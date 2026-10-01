@@ -42,7 +42,7 @@ Balance issues found and fixed through simulation:
 1. **Mid-run state is not saved.** Closing the app mid-run loses the current run, but discoveries, mastery and banked Essence are safe. Next step: serialize `Run` (seed, floor, upgrades, HP, catalysts, RNG positions) at each map screen.
 2. **Only one region and one boss.** The region, template and boss data formats support more, but boss behaviour is code (`BossController`). A second boss should prompt a small behaviour-script format (attack patterns as data).
 3. **No human playtest yet.** Feel, difficulty and onboarding clarity have only been checked with the bot, the automated browser playthrough and screenshots.
-4. **Visuals are programmer art:** vector shapes, glyphs and particles. They are readable and consistent, but the art pass is still to come.
+4. **Procedural art pass implemented:** engraved arenas, animated creature silhouettes, reagent props, luminous trails and elemental bursts, with a matching menu and HUD. Physical-device performance and human readability playtests are still needed.
 5. **Audio is synthesized placeholder.** The event → sound mapping and the adaptive intensity drone are in place for real assets to slot into.
 6. **Reagent Lens research is purchasable but has no in-game effect yet.** It is planned to show enemy weaknesses while aiming. Implement it or hide it before release.
 7. **Enemy-enemy collision is O(n²).** This is fine at the current counts (≤ 15). Add a spatial hash if Endless mode raises them.

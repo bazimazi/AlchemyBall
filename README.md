@@ -33,6 +33,9 @@ Launches spend **pips** (the white circles at the top), which recharge over time
 | `npm run graph` | Same as `validate`, plus the reaction dependency graph as Mermaid |
 | `npm run sim -- 20 0.6` | Balance simulation: bot runs × cores × skill. Prints win rate, reactions/min, discovery rate, reaction share and room length |
 | `node tools/smoke.mjs` / `node tools/playthrough.mjs <url> <outDir> <seconds>` | Drive the built game in a real browser (Chrome or Edge via `playwright-core`), take screenshots, and fail on console errors. Start `npm run preview` first. |
+| `npm run build` then `node tools/visual-review.mjs --playthrough` | Start a temporary preview server, capture desktop/mobile art and combat scenes, check narrow layouts and reduced motion, then run smoke and playthrough checks. Screenshots go to `smoke-out/visual/`; set `BROWSER` to use a different Chromium executable. |
+
+The visual style uses engraved stone, brass details and luminous elemental sources. Creatures have distinct silhouettes, gaze tracking, idle motion and impact deformation. Reactions combine shockwaves, sparks, crystal shards and layered lightning; the orb leaves a time-based light trail. Everything is drawn locally with Canvas and CSS, with no external art downloads. Reduced motion follows both the in-game setting and the operating system preference.
 
 The docs cover the details:
 

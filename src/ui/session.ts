@@ -68,6 +68,7 @@ export class Session {
     private onEnd: (r: SessionEnd) => void,
   ) {
     const p = app.profile;
+    app.fx.reset();
     this.world = new World({
       encounter: spec, coreElement: opts.coreElement, maxHp: opts.maxHp, hp: opts.hp, shell: run ? Content.shells.get(run.cfg.shell) : undefined,
       mods: opts.mods, unlocks: new Set(p.research), potency: potencyMap(p), maxPips: opts.maxPips, seed: opts.seed, sandbox: opts.sandbox,
@@ -304,7 +305,7 @@ export class Session {
     if (!this.paused) fx.update(dtReal * (scale > 0 ? Math.max(scale, 0.3) : 0));
     this.recentReactions = Math.max(0, this.recentReactions - dtReal * 0.8);
     this.app.audio.update(dtReal, clamp(w.enemies.length / 8 + this.recentReactions / 6, 0, 1));
-    this.app.renderer.draw(w, fx, this.run?.region, this.aim, dtReal);
+    this.app.renderer.draw(w, fx, this.run?.region, this.aim, this.paused || this.blocking ? 0 : dtReal);
     this.updateHud(dtReal);
     if (this.tracker.consumeDirty()) this.app.saveSoon();
     if (w.over && !this.ended) {

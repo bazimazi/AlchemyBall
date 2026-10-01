@@ -32,7 +32,7 @@ src/
     save.ts        versioned, checksummed, backed-up persistence + migrations
     autoplay.ts    scripted bot used by the simulator and the soak test
     analytics.ts   opt-in, local-only aggregate counters
-  render/      Canvas renderer + FX (pooled particles, rings, arcs, floating text)
+  render/      Canvas renderer + procedural art + FX (pooled particles, rings, arcs, floating text)
   audio/       procedural WebAudio synth, adaptive drone, haptics
   ui/          DOM screens: app flow, session (loop + input + HUD), codex
 tools/         validate / sim / browser smoke + playthrough
@@ -103,6 +103,8 @@ The simulation is O(n²) only for enemy-enemy separation (n ≤ about 15 in prac
 - degrades automatically: if frames average worse than 45 FPS, it lowers the particle budget and backing-store resolution, and raises them again when there is headroom.
 
 The reaction burst budget keeps worst-case frames bounded. The soak test asserts at most 40 reactions per step.
+
+The engraved floor is cached in an offscreen canvas. `render/art.ts` draws creature anatomy and reagent props; movement and material lighting are presentation-only and never change colliders. Orb trails expire by elapsed time and reset when the world changes. FX reset at encounter boundaries, and shockwave rings have a fixed budget. Reduced motion disables decorative animation and reduces particle counts and speed; pausing freezes presentation time. The browser visual review captures a specimen arena, a boss burst, menus and touch-sized aiming at multiple viewport sizes.
 
 ## Testing
 

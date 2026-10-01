@@ -46,6 +46,7 @@ export class App {
     if (this.slot.lastLoadSource === 'backup') setTimeout(() => toast(this.root, 'Your save was damaged; restored the last good copy.', '#ffd23a', 5000), 500);
     this.applySettings();
     window.addEventListener('resize', () => this.renderer.resize(this.quality));
+    window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => this.applySettings());
     window.addEventListener('pagehide', () => this.save());
     this.renderer.resize(this.quality);
     requestAnimationFrame((t) => this.loop(t));
@@ -74,12 +75,14 @@ export class App {
     const s = this.profile.settings;
     this.audio.setVolumes(s.sfxVolume, s.musicVolume);
     this.haptics.enabled = s.haptics;
-    this.fx.reducedMotion = s.reducedMotion;
+    const reducedMotion = s.reducedMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.fx.reducedMotion = reducedMotion;
+    if (reducedMotion) { this.fx.shake = 0; this.fx.flash = 0; }
     this.fx.damageNumbers = s.showDamageNumbers;
     this.renderer.highContrast = s.highContrast;
     this.analytics.enabled = s.analyticsOptIn;
     document.body.classList.toggle('hc', s.highContrast);
-    document.body.classList.toggle('rm', s.reducedMotion);
+    document.body.classList.toggle('rm', reducedMotion);
   }
 
   // ─── Loop ─────────────────────────────────────────────────────────────────
@@ -106,6 +109,7 @@ export class App {
     } else if (avg < 1 / 58 && this.quality < 1) {
       this.quality = Math.min(1, this.quality + 0.25);
       this.fx.quality = this.quality;
+      this.renderer.resize(this.quality);
     }
   }
 
@@ -138,22 +142,38 @@ export class App {
     const hasLab = p.research.includes('res_lab');
     const hasDaily = p.research.includes('res_daily');
     const today = dailyKey(new Date());
-    this.show(h('div', { class: 'screen' },
-      h('div', { class: 'wrap' },
-        h('div', { class: 'row' }, this.resBar(), h('div', { class: 'spacer' }), h('span', { class: 'pill' }, `Lv ${p.level}`)),
-        h('div', { class: 'title' }, h('h1', null, 'Alchemy Ball'), h('div', { class: 'dim' }, 'Every collision changes the ball.')),
-        h('div', { class: 'card small' },
-          h('div', { class: 'row' }, h('span', null, `Reactions discovered: `, h('b', null, `${known}/${Content.lists.REACTIONS.length}`)), h('div', { class: 'spacer' }), h('span', { class: 'dim' }, nl ? `${p.xp}/${nl.xp} XP` : 'Max level')),
-          p.stats.runs > 0 ? h('div', { class: 'dim tiny', style: 'margin-top:6px' }, `Runs ${p.stats.runs} · Wins ${p.stats.wins} · Best floor ${p.stats.bestFloor}`) : null,
+    this.show(h('div', { class: 'screen menu-screen' },
+      h('div', { class: 'wrap menu-wrap' },
+        h('div', { class: 'row menu-top' }, h('span', { class: 'wordmark' }, '✧  THE ALCHEMIST’S FIELD NOTES'), h('div', { class: 'spacer' }), this.resBar(), h('span', { class: 'pill' }, `Lv ${p.level}`)),
+        h('div', { class: 'menu-hero' },
+          h('div', { class: 'hero-art', 'aria-hidden': 'true' },
+            h('div', { class: 'orbit orbit-one' }), h('div', { class: 'orbit orbit-two' }), h('div', { class: 'orbit orbit-three' }),
+            h('div', { class: 'hero-sigil' }), h('div', { class: 'hero-core' }),
+            h('span', { class: 'satellite fire' }, '△'), h('span', { class: 'satellite water' }, '▽'), h('span', { class: 'satellite frost' }, '✧'),
+            h('span', { class: 'art-label label-one' }, 'IGNIS'), h('span', { class: 'art-label label-two' }, 'AQUA'),
+          ),
+          h('div', { class: 'title' }, h('div', { class: 'eyebrow' }, 'A PHYSICS-DRIVEN ALCHEMICAL ROGUELITE'), h('h1', null, 'Alchemy Ball'), h('div', { class: 'dim' }, 'Every collision changes the ball.')),
         ),
-        h('div', { class: 'menu-buttons' },
+        h('div', { class: 'menu-panel' },
+          h('div', { class: 'eyebrow' }, 'YOUR NEXT GREAT DISCOVERY'),
+          h('h2', null, 'A little chaos. A little alchemy.'),
+          h('p', { class: 'menu-intro dim' }, 'Cast your core into the Cinder Marsh. Borrow its elements. Discover what happens when they collide.'),
+          h('div', { class: 'menu-buttons' },
           h('button', { class: 'primary', onclick: () => (this.audio.unlock(), this.audio.ui(), p.tutorialDone ? this.showPrep() : this.startRun({ tutorial: true })) }, p.tutorialDone ? 'Begin Run' : 'Begin — First Experiment'),
           hasDaily ? h('button', { onclick: () => (this.audio.unlock(), this.startRun({ daily: true })) }, `Daily Experiment ${p.daily[today] ? `(best ${p.daily[today].score})` : ''}`) : null,
-          h('button', { onclick: () => (this.audio.ui(), this.showCodex()) }, 'Alchemy Codex'),
-          h('button', { onclick: () => (this.audio.ui(), this.showResearch()) }, 'Research'),
+          h('div', { class: 'grid2 menu-secondary' },
+            h('button', { onclick: () => (this.audio.ui(), this.showCodex()) }, h('span', { class: 'nav-symbol' }, '✧'), 'Alchemy Codex'),
+            h('button', { onclick: () => (this.audio.ui(), this.showResearch()) }, h('span', { class: 'nav-symbol' }, '⚗'), 'Research')),
           hasLab ? h('button', { onclick: () => (this.audio.unlock(), this.showLabSetup()) }, 'Laboratory') : null,
-          h('button', { class: 'ghost', onclick: () => (this.audio.ui(), this.showSettings(() => this.showMenu())) }, 'Settings'),
+          ),
+          h('div', { class: 'discovery-progress' },
+            h('div', { class: 'row small' }, h('span', { class: 'dim' }, 'Reactions discovered'), h('div', { class: 'spacer' }), h('b', null, `${known} / ${Content.lists.REACTIONS.length}`)),
+            h('div', { class: 'progress-track' }, h('i', { style: `width:${known / Content.lists.REACTIONS.length * 100}%` })),
+            h('div', { class: 'row tiny dim' }, h('span', null, nl ? `${p.xp} / ${nl.xp} XP to next level` : 'Max level'), h('div', { class: 'spacer' }), h('span', null, p.stats.runs > 0 ? `${p.stats.wins} wins · best floor ${p.stats.bestFloor}` : 'Apprentice alchemist')),
+          ),
+          h('button', { class: 'ghost menu-settings', onclick: () => (this.audio.ui(), this.showSettings(() => this.showMenu())) }, 'Settings'),
         ),
+        h('div', { class: 'menu-footer' }, h('span', null, 'PULL BACK. LET GO. EXPERIMENT.'), h('span', null, 'THE CINDER MARSH  /  CHAPTER I')),
       ),
     ));
   }
@@ -478,7 +498,7 @@ export class App {
         toggle('Haptics', 'haptics'),
         toggle('Left-handed HUD', 'leftHanded'),
         toggle('Damage numbers', 'showDamageNumbers'),
-        toggle('Reduced motion', 'reducedMotion', 'No screen shake or flashes'),
+        toggle('Reduced motion', 'reducedMotion', 'Calmer particles; no ambient motion, shake or flashes'),
         toggle('High contrast', 'highContrast'),
         toggle('Share anonymous stats', 'analyticsOptIn', 'Stored locally only; export for playtests'),
       ),

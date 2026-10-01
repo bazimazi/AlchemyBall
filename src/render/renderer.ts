@@ -5,6 +5,7 @@ import { PHYS } from '../sim/ballPhysics';
 import type { ArenaObject, Enemy, Zone } from '../sim/entities';
 import type { World } from '../sim/world';
 import type { Fx } from './fx';
+import { circle, creature, glow, reagent, sigil } from './art';
 
 export interface AimState {
   active: boolean;
@@ -33,7 +34,13 @@ export class Renderer {
   oy = 0;
   dpr = 1;
   highContrast = false;
-  private trail: { x: number; y: number; c: string }[] = [];
+  private trail: { x: number; y: number; c: string; life: number }[] = [];
+  private floorCache: HTMLCanvasElement | null = null;
+  private floorKey = '';
+  private world: World | null = null;
+  private reducedMotion = false;
+  private frameDt = 0;
+  private quality = 1;
   private t = 0;
 
   constructor(readonly canvas: HTMLCanvasElement) {
@@ -43,6 +50,7 @@ export class Renderer {
   resize(quality: number): void {
     const dpr = Math.min(window.devicePixelRatio || 1, quality >= 1 ? 2 : 1.25);
     this.dpr = dpr;
+    this.quality = quality;
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.canvas.width = Math.round(w * dpr);
@@ -50,9 +58,10 @@ export class Renderer {
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     // Reserve room for the HUD at the top and bottom.
-    const top = 76;
-    const bottom = 56;
-    const s = Math.min(w / PHYS.arenaW, (h - top - bottom) / PHYS.arenaH);
+    const css = getComputedStyle(document.documentElement);
+    const top = 88 + (parseFloat(css.getPropertyValue('--safe-top')) || 0);
+    const bottom = 64 + (parseFloat(css.getPropertyValue('--safe-bottom')) || 0);
+    const s = Math.max(0.05, Math.min((w - 28) / PHYS.arenaW, (h - top - bottom) / PHYS.arenaH));
     this.scale = s;
     this.ox = (w - PHYS.arenaW * s) / 2;
     this.oy = top + (h - top - bottom - PHYS.arenaH * s) / 2;
@@ -69,17 +78,22 @@ export class Renderer {
   }
 
   draw(w: World, fx: Fx, region: RegionDef | undefined, aim: AimState, dt: number): void {
-    this.t += dt;
+    this.reducedMotion = fx.reducedMotion;
+    this.frameDt = dt;
+    if (!this.reducedMotion) this.t += dt;
+    if (this.world !== w) { this.trail = []; this.world = w; }
     const ctx = this.ctx;
     const pal = region?.palette ?? { bg: '#0d0f14', floor: '#171c22', wall: '#3a4452', accent: '#ff8a3d' };
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = pal.bg;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    const sx = fx.shake ? (Math.random() - 0.5) * fx.shake : 0;
-    const sy = fx.shake ? (Math.random() - 0.5) * fx.shake : 0;
+    const shake = dt > 0 && !this.reducedMotion ? fx.shake : 0;
+    const sx = shake ? (Math.random() - 0.5) * shake : 0;
+    const sy = shake ? (Math.random() - 0.5) * shake : 0;
     ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, this.dpr * (this.ox + sx), this.dpr * (this.oy + sy));
 
-    this.drawFloor(pal.floor);
+    this.drawFloor(pal.floor, pal.accent);
+    this.drawAtmosphere(pal.accent);
     for (const z of w.zones) this.drawZone(z);
     this.drawWalls(w, pal.wall);
     for (const t of w.telegraphs) {
@@ -109,7 +123,7 @@ export class Renderer {
       ctx.setLineDash([]);
     }
     for (const o of w.objects) this.drawObject(o);
-    for (const e of w.enemies) this.drawEnemy(e);
+    for (const e of w.enemies) this.drawEnemy(e, w.ball.pos);
     for (const p of w.projectiles) {
       const color = p.element ? Content.elements.get(p.element)?.color ?? '#fff' : '#fff';
       const lift = p.lob ? Math.sin(Math.PI * (p.lob.t / p.lob.dur)) * 60 : 0;
@@ -120,6 +134,10 @@ export class Renderer {
       ctx.arc(p.pos.x, p.pos.y - lift, p.radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
+    }
+    if (aim.active) {
+      ctx.fillStyle = '#050c1838';
+      ctx.fillRect(0, 0, PHYS.arenaW, PHYS.arenaH);
     }
     this.drawBall(w, aim);
     this.drawFx(fx);
@@ -132,42 +150,81 @@ export class Renderer {
     }
   }
 
-  private drawFloor(floor: string): void {
+  /** Static engraved stone is cached; animated illumination is a separate pass. */
+  private drawFloor(floor: string, accent: string): void {
+    const W = PHYS.arenaW, H = PHYS.arenaH;
+    const key = `${floor}|${accent}|${this.highContrast}`;
+    if (!this.floorCache || key !== this.floorKey) {
+      this.floorKey = key;
+      const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+      const c = canvas.getContext('2d')!;
+      c.beginPath(); c.moveTo(40, 0); c.lineTo(W - 40, 0); c.lineTo(W, 40); c.lineTo(W, H - 40);
+      c.lineTo(W - 40, H); c.lineTo(40, H); c.lineTo(0, H - 40); c.lineTo(0, 40); c.closePath(); c.clip();
+      c.fillStyle = floor; c.fillRect(0, 0, W, H);
+      // Staggered slabs, with deterministic mineral flecks and worn edges.
+      for (let row = 0; row < 15; row++) for (let col = -1; col < 9; col++) {
+        const x = col * 96 + row % 2 * 48, y = row * 80;
+        const k = Math.sin(row * 127 + col * 311) * 0.5 + 0.5;
+        c.fillStyle = `rgba(109,145,150,${0.025 + k * 0.035})`;
+        c.fillRect(x + 2, y + 2, 92, 76);
+        c.strokeStyle = '#030b1260'; c.strokeRect(x + 1, y + 1, 94, 78);
+        c.strokeStyle = '#92c2c00b'; c.beginPath(); c.moveTo(x + 3, y + 3); c.lineTo(x + 92, y + 3); c.stroke();
+        if (k > 0.65) { c.strokeStyle = '#030b1240'; c.beginPath(); c.moveTo(x + 16, y + 2); c.lineTo(x + 24, y + 21); c.lineTo(x + 19, y + 33); c.stroke(); }
+      }
+      const light = c.createRadialGradient(W / 2, H * 0.4, 60, W / 2, H / 2, H * 0.65);
+      light.addColorStop(0, '#47848018'); light.addColorStop(0.65, '#04111910'); light.addColorStop(1, '#00050cbb');
+      c.fillStyle = light; c.fillRect(0, 0, W, H);
+      c.strokeStyle = '#8ca58e26'; c.lineWidth = 1; c.strokeRect(23, 23, W - 46, H - 46); c.strokeRect(29, 29, W - 58, H - 58);
+      sigil(c, W / 2, H / 2, 213, '#a1bca51c');
+      sigil(c, W / 2, H / 2, 153, '#d3b67a16', Math.PI / 6);
+      for (const y of [90, H - 90]) {
+        sigil(c, W / 2, y, 38, accent + '33');
+        c.strokeStyle = accent + '25'; c.beginPath(); c.moveTo(80, y); c.lineTo(W / 2 - 56, y); c.moveTo(W / 2 + 56, y); c.lineTo(W - 80, y); c.stroke();
+      }
+      for (let i = 0; i < 900; i++) {
+        const x = ((Math.sin(i * 127.1) * 43758.5453) % 1 + 1) % 1 * W;
+        const y = ((Math.sin(i * 311.7) * 96453.912) % 1 + 1) % 1 * H;
+        c.fillStyle = i % 2 ? '#d7dfb209' : '#00000024'; c.fillRect(x, y, 1.5, 1.5);
+      }
+      this.floorCache = canvas;
+    }
     const ctx = this.ctx;
-    ctx.fillStyle = floor;
-    ctx.beginPath();
-    const c = 40;
-    const W = PHYS.arenaW;
-    const H = PHYS.arenaH;
-    ctx.moveTo(c, 0);
-    ctx.lineTo(W - c, 0);
-    ctx.lineTo(W, c);
-    ctx.lineTo(W, H - c);
-    ctx.lineTo(W - c, H);
-    ctx.lineTo(c, H);
-    ctx.lineTo(0, H - c);
-    ctx.lineTo(0, c);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.035)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let x = 60; x < W; x += 60) (ctx.moveTo(x, 0), ctx.lineTo(x, H));
-    for (let y = 60; y < H; y += 60) (ctx.moveTo(0, y), ctx.lineTo(W, y));
-    ctx.stroke();
+    ctx.save(); ctx.shadowColor = '#000'; ctx.shadowBlur = 35; ctx.shadowOffsetY = 12;
+    ctx.drawImage(this.floorCache, 0, 0); ctx.restore();
+  }
+
+  private drawAtmosphere(accent: string): void {
+    const c = this.ctx;
+    glow(c, 80, 100, 230, '#399fa5', 0.08);
+    glow(c, PHYS.arenaW - 70, PHYS.arenaH - 120, 260, accent, 0.07);
+    if (this.reducedMotion) return;
+    c.save();
+    for (let i = 0; i < 22 * this.quality; i++) {
+      const x = 35 + ((i * 173.3 + Math.sin(this.t * 0.2 + i) * 20) % 650 + 650) % 650;
+      const y = (i * 97.1 - this.t * (6 + i % 4) + 11200) % 1080 + 20;
+      c.globalAlpha = 0.12 + Math.max(0, Math.sin(this.t + i * 4)) * 0.26;
+      c.fillStyle = i % 3 ? '#a4d8ca' : '#ffba79'; circle(c, x, y, i % 3 === 0 ? 1.8 : 1); c.fill();
+    }
+    c.restore();
   }
 
   private drawWalls(w: World, wallColor: string): void {
-    const ctx = this.ctx;
-    ctx.lineCap = 'round';
+    const c = this.ctx;
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
     for (const wl of w.walls) {
-      ctx.strokeStyle = wl.material === 'bumper' ? '#ff4fa3' : wl.material === 'metal' ? '#b8c2cc' : this.highContrast ? '#ffffff' : wallColor;
-      ctx.lineWidth = wl.material === 'stone' ? 8 : 10;
-      ctx.beginPath();
-      ctx.moveTo(wl.a.x, wl.a.y);
-      ctx.lineTo(wl.b.x, wl.b.y);
-      ctx.stroke();
+      const color = wl.material === 'bumper' ? '#ff62b3' : wl.material === 'metal' ? '#9bced7' : this.highContrast ? '#ffffff' : wallColor;
+      c.beginPath(); c.moveTo(wl.a.x, wl.a.y); c.lineTo(wl.b.x, wl.b.y);
+      c.strokeStyle = '#02080c'; c.lineWidth = 19; c.stroke();
+      c.strokeStyle = color; c.lineWidth = 12; c.stroke();
+      c.strokeStyle = wl.material === 'stone' ? '#94b3ad55' : '#ffffffaa'; c.lineWidth = 2; c.stroke();
+      const len = Math.hypot(wl.b.x - wl.a.x, wl.b.y - wl.a.y);
+      for (let d = 0; d <= len; d += 68) {
+        const x = wl.a.x + (wl.b.x - wl.a.x) * d / len, y = wl.a.y + (wl.b.y - wl.a.y) * d / len;
+        c.fillStyle = '#1c3038'; circle(c, x, y, 5); c.fill();
+        c.fillStyle = wl.material === 'stone' ? '#c4b17a' : color; circle(c, x, y, 1.8); c.fill();
+      }
     }
+    c.restore();
   }
 
   private drawZone(z: Zone): void {
@@ -185,6 +242,19 @@ export class Renderer {
         ctx.beginPath();
         ctx.arc(z.pos.x, z.pos.y, z.radius, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = z.def.color + '88'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.save(); ctx.clip();
+        // Caustic ribbons and bubbles give liquid a surface without obscuring actors.
+        for (let i = 0; i < 5; i++) {
+          const phase = this.t * 0.7 + i * 2 + z.uid;
+          ctx.globalAlpha = fade * own * 0.22;
+          ctx.strokeStyle = '#cff6e9'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.ellipse(z.pos.x + Math.sin(phase) * z.radius * 0.18, z.pos.y + (i - 2) * z.radius * 0.3, z.radius * 0.8, 5 + Math.sin(phase) * 3, -0.15, 0, Math.PI * 2); ctx.stroke();
+          const bx = z.pos.x + Math.sin(i * 13 + z.uid) * z.radius * 0.7;
+          const by = z.pos.y + z.radius * 0.7 - ((this.t * 9 + i * 31) % (z.radius * 1.4));
+          circle(ctx, bx, by, 2 + i % 3); ctx.stroke();
+        }
+        ctx.restore();
         ctx.strokeStyle = z.def.color;
         ctx.lineWidth = 2;
         const rr = (this.t * 20 + z.uid * 13) % z.radius;
@@ -195,14 +265,11 @@ export class Renderer {
         break;
       }
       case 'cloud': {
-        ctx.fillStyle = z.def.color;
         for (let i = 0; i < 6; i++) {
           const a = (i / 6) * Math.PI * 2 + this.t * 0.3 + z.uid;
           const r = z.radius * 0.55;
-          ctx.globalAlpha = fade * 0.18;
-          ctx.beginPath();
-          ctx.arc(z.pos.x + Math.cos(a) * r * 0.5, z.pos.y + Math.sin(a) * r * 0.5, r, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.globalAlpha = fade * own;
+          glow(ctx, z.pos.x + Math.cos(a) * r * 0.7, z.pos.y + Math.sin(a) * r * 0.6, r * 1.25, z.def.color, 0.25);
         }
         break;
       }
@@ -217,7 +284,16 @@ export class Renderer {
           const y = z.pos.y + Math.sin(a) * r;
           i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
         }
+        ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = z.def.color; ctx.lineWidth = 1.5; ctx.stroke();
+        if (z.def.element === 'ice') {
+          ctx.strokeStyle = '#e6fbff'; ctx.globalAlpha = fade * 0.55;
+          for (let i = 0; i < 6; i++) {
+            const a = i * Math.PI / 3 + z.uid;
+            ctx.beginPath(); ctx.moveTo(z.pos.x, z.pos.y); ctx.lineTo(z.pos.x + Math.cos(a) * z.radius * 0.8, z.pos.y + Math.sin(a) * z.radius * 0.8); ctx.stroke();
+          }
+        }
         break;
       }
       case 'current':
@@ -246,66 +322,9 @@ export class Renderer {
   }
 
   private drawObject(o: ArenaObject): void {
-    const ctx = this.ctx;
-    const { x, y } = o.pos;
-    const r = o.radius;
-    const amt = o.def.element ? o.auras.get(o.def.element) ?? 0 : 0;
-    const col = o.def.color;
-    ctx.save();
-    if (o.def.element && amt > 0.2) {
-      ctx.shadowColor = col;
-      ctx.shadowBlur = 14 * Math.min(1, amt);
-    }
-    ctx.fillStyle = o.hitFlash > 0 ? '#ffffff' : '#20262e';
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 3;
-    switch (o.def.look) {
-      case 'bumper':
-        ctx.fillStyle = o.hitFlash > 0 ? '#ffffff' : '#3a1030';
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.lineWidth = 5;
-        ctx.stroke();
-        break;
-      case 'crate':
-      case 'barrel':
-        ctx.fillStyle = o.hitFlash > 0 ? '#ffffff' : o.def.look === 'crate' ? '#5a3f22' : '#2f4a14';
-        ctx.fillRect(x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7);
-        ctx.strokeRect(x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7);
-        break;
-      case 'crystal':
-        ctx.beginPath();
-        ctx.moveTo(x, y - r * 1.15);
-        ctx.lineTo(x + r * 0.8, y);
-        ctx.lineTo(x, y + r * 1.15);
-        ctx.lineTo(x - r * 0.8, y);
-        ctx.closePath();
-        ctx.fillStyle = o.hitFlash > 0 ? '#ffffff' : col + '55';
-        ctx.fill();
-        ctx.stroke();
-        break;
-      default:
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-    }
-    ctx.shadowBlur = 0;
-    const el = o.def.element ? Content.elements.get(o.def.element) : undefined;
-    // Glyph shows what the object gives; dim when depleted.
-    ctx.globalAlpha = el ? 0.35 + 0.65 * Math.min(1, amt) : 1;
-    ctx.fillStyle = col;
-    ctx.font = `${Math.round(r * 1.1)}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const glyph = el?.glyph ?? (o.def.look === 'bumper' ? '' : o.def.look === 'crate' ? '▦' : '');
-    if (glyph) ctx.fillText(glyph, x, y + 1);
-    ctx.globalAlpha = 1;
-    // Transient auras painted on objects (e.g. fire on a crate).
-    this.drawAuraPips(o.auras, x, y, r, o.def.element);
-    if (o.def.hp !== undefined && o.hp < o.maxHp) this.drawBar(x, y + r + 8, r * 1.6, o.hp / o.maxHp, '#ddd');
-    ctx.restore();
+    reagent(this.ctx, o, this.reducedMotion ? 0 : this.t);
+    this.drawAuraPips(o.auras, o.pos.x, o.pos.y, o.radius, o.def.element);
+    if (o.def.hp !== undefined && o.hp < o.maxHp) this.drawBar(o.pos.x, o.pos.y + o.radius + 8, o.radius * 1.6, o.hp / o.maxHp, '#ddd');
   }
 
   private drawAuraPips(auras: Map<string, number>, x: number, y: number, r: number, skip?: string): void {
@@ -335,89 +354,23 @@ export class Renderer {
     ctx.fillRect(cx - w / 2, y, w * Math.max(0, frac), 5);
   }
 
-  private drawEnemy(e: Enemy): void {
-    const ctx = this.ctx;
-    const { x, y } = e.pos;
-    const r = e.radius;
+  private drawEnemy(e: Enemy, target: Vec2): void {
+    const ctx = this.ctx, { x, y } = e.pos, r = e.radius;
+    ctx.save();
     if (e.spawnFx > 0) {
-      ctx.strokeStyle = e.def.color;
-      ctx.globalAlpha = 0.8;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.arc(x, y, r * (1 + e.spawnFx), 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 0.3;
+      sigil(ctx, x, y, r * (1.2 + e.spawnFx), e.def.color + 'aa', this.t);
+      ctx.globalAlpha = Math.max(0.25, 1 - e.spawnFx);
     }
-    const frozen = e.statuses.has('frozen');
-    const petrified = e.statuses.has('petrified');
-    const flying = e.tags.includes('flying');
-    if (flying) {
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.beginPath();
-      ctx.ellipse(x, y + r + 10, r * 0.8, r * 0.3, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    const bob = flying ? Math.sin(this.t * 4 + e.uid) * 3 : 0;
-    ctx.fillStyle = e.hitFlash > 0 ? '#ffffff' : frozen ? '#bdf3ff' : petrified ? '#8a6a4a' : e.def.color;
-    ctx.beginPath();
-    if (e.def.ai === 'bloat') {
-      const pulse = 1 + Math.sin(this.t * 3 + e.uid) * 0.05;
-      ctx.arc(x, y + bob, r * pulse, 0, Math.PI * 2);
-    } else if (e.tags.includes('armored')) {
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-        i ? ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r) : ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
-      }
-      ctx.closePath();
-    } else ctx.arc(x, y + bob, r, 0, Math.PI * 2);
-    ctx.fill();
-    if (e.isBoss || e.tags.includes('elite')) {
-      ctx.strokeStyle = e.isBoss ? '#ffd23a' : '#ff6ad5';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
-    if (e.tags.includes('armored') && !e.statuses.has('exposed') && e.armor > 0) {
-      ctx.strokeStyle = '#dfe7ef';
-      ctx.lineWidth = 2 + e.armor * 3;
-      ctx.stroke();
-    }
-    // Eyes look at nothing in particular — cheap personality.
-    if (e.def.ai !== 'dummy') {
-      ctx.fillStyle = '#0d0f14';
-      const ey = y + bob - r * 0.15;
-      ctx.beginPath();
-      ctx.arc(x - r * 0.3, ey, r * 0.13, 0, Math.PI * 2);
-      ctx.arc(x + r * 0.3, ey, r * 0.13, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.strokeStyle = '#6b5530';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(x, y, r * 0.55, 0, Math.PI * 2);
-      ctx.moveTo(x + r * 0.25, y);
-      ctx.arc(x, y, r * 0.25, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    if (frozen) {
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8);
-    }
-    ctx.globalAlpha = 1;
-    this.drawAuraPips(e.auras, x, y + bob, r);
-    // Status glyphs.
+    creature(ctx, e, this.t, target, this.reducedMotion);
+    ctx.restore();
+    this.drawAuraPips(e.auras, x, y, r);
     let si = 0;
     for (const s of e.statuses.keys()) {
       const [g, c] = STATUS_GLYPH[s];
-      ctx.fillStyle = c;
-      ctx.font = '14px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(g, x - 12 + si * 14, y - r - 14);
-      si++;
+      ctx.fillStyle = c; ctx.font = '14px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(g, x - 12 + si * 14, y - r - 14); si++;
     }
-    if (!e.isBoss && e.hp < e.maxHp) this.drawBar(x, y + r + 6, r * 1.8, e.hp / e.maxHp, '#ff5a5a');
+    if (!e.isBoss && e.hp < e.maxHp) this.drawBar(x, y + r + 8, r * 1.8, e.hp / e.maxHp, '#ff7973');
   }
 
   private drawBall(w: World, aim: AimState): void {
@@ -426,18 +379,21 @@ export class Renderer {
     const auras = w.ballAuras().filter((a) => Content.elements.get(a.element)?.tier !== 'hidden');
     const main = Content.elements.get(auras[0]?.element ?? b.coreElement)!;
     const speed = vlen(b.vel);
-    // Trail colored by the ball's dominant element.
-    if (speed > 80) this.trail.push({ x: b.pos.x, y: b.pos.y, c: main.color });
-    if (this.trail.length > 18 || (speed <= 80 && this.trail.length)) this.trail.shift();
-    for (let i = 0; i < this.trail.length; i++) {
-      const p = this.trail[i];
-      ctx.globalAlpha = (i / this.trail.length) * 0.45;
-      ctx.fillStyle = p.c;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, b.radius * (0.4 + (0.6 * i) / this.trail.length), 0, Math.PI * 2);
-      ctx.fill();
+    // A time-based ribbon stays the same length on 60 Hz and high-refresh displays.
+    for (const p of this.trail) p.life -= this.frameDt;
+    this.trail = this.trail.filter((p) => p.life > 0);
+    if (speed > 80 && this.frameDt > 0) this.trail.push({ x: b.pos.x, y: b.pos.y, c: main.color, life: this.reducedMotion ? 0.08 : 0.24 });
+    if (this.trail.length > 72) this.trail.shift();
+    ctx.save(); ctx.lineCap = 'round'; ctx.globalCompositeOperation = 'lighter';
+    for (let i = 1; i < this.trail.length; i++) {
+      const p = this.trail[i], prev = this.trail[i - 1], k = p.life / 0.24;
+      if (Math.hypot(p.x - prev.x, p.y - prev.y) > 160) continue;
+      ctx.strokeStyle = p.c; ctx.globalAlpha = k * 0.26; ctx.lineWidth = b.radius * 1.7 * k;
+      ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = k * 0.4; ctx.lineWidth = 3 * k; ctx.stroke();
     }
-    ctx.globalAlpha = 1;
+    ctx.restore();
+    glow(ctx, b.pos.x, b.pos.y, b.radius * (aim.active ? 5 : 3.5), main.color, aim.active ? 0.45 : 0.3);
     if (aim.active) this.drawAim(w, aim);
     // Body.
     const lightning = b.buffs.has('ballLightning');
@@ -447,7 +403,8 @@ export class Renderer {
     const g = ctx.createRadialGradient(b.pos.x - 5, b.pos.y - 5, 2, b.pos.x, b.pos.y, b.radius);
     g.addColorStop(0, '#ffffff');
     g.addColorStop(0.35, main.color);
-    g.addColorStop(1, iron ? '#4a4e55' : auras[1] ? Content.elements.get(auras[1].element)!.color : main.color);
+    g.addColorStop(0.72, iron ? '#687782' : auras[1] ? Content.elements.get(auras[1].element)!.color : main.color);
+    g.addColorStop(1, '#172536');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(b.pos.x, b.pos.y, b.radius, 0, Math.PI * 2);
@@ -457,6 +414,8 @@ export class Renderer {
     ctx.strokeStyle = b.invuln > 0 && Math.floor(this.t * 20) % 2 ? '#ff4a4a' : '#ffffff';
     ctx.lineWidth = 2.5;
     ctx.stroke();
+    ctx.fillStyle = '#ffffffaa';
+    ctx.beginPath(); ctx.ellipse(b.pos.x - 4, b.pos.y - 6, 6, 3, -0.5, 0, Math.PI * 2); ctx.fill();
     if (b.shield > 0) {
       ctx.strokeStyle = '#bdf3ff';
       ctx.lineWidth = 2;
@@ -470,7 +429,7 @@ export class Renderer {
       ctx.beginPath();
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2 + this.t * 9;
-        const rr = b.radius + 5 + Math.random() * 6;
+        const rr = b.radius + 5 + (Math.sin(i * 7 + this.t * 20) + 1) * 3;
         i ? ctx.lineTo(b.pos.x + Math.cos(a) * rr, b.pos.y + Math.sin(a) * rr) : ctx.moveTo(b.pos.x + Math.cos(a) * rr, b.pos.y + Math.sin(a) * rr);
       }
       ctx.closePath();
@@ -530,12 +489,17 @@ export class Renderer {
     }
     ctx.strokeStyle = w.canLaunch() ? '#ffffff' : '#ff5a5a';
     ctx.globalAlpha = 0.75;
-    ctx.setLineDash([3, 9]);
+    ctx.setLineDash([2, 12]);
+    ctx.lineDashOffset = -this.t * 32;
     ctx.lineWidth = 3;
     ctx.beginPath();
     pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    const end = pts[pts.length - 1];
+    ctx.lineWidth = 1.5; circle(ctx, end.x, end.y, 9); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(end.x - 14, end.y); ctx.lineTo(end.x + 14, end.y); ctx.moveTo(end.x, end.y - 14); ctx.lineTo(end.x, end.y + 14); ctx.stroke();
     // Power ring.
     ctx.lineWidth = 4;
     ctx.beginPath();
@@ -548,12 +512,16 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.globalCompositeOperation = 'lighter';
     for (const r of fx.rings) {
+      const k = Math.max(0, r.life / r.max);
+      if (!this.reducedMotion && this.quality >= 0.75) glow(ctx, r.x, r.y, Math.max(1, r.r), r.color, k * 0.16);
       ctx.strokeStyle = r.color;
-      ctx.globalAlpha = Math.max(0, r.life / r.max);
-      ctx.lineWidth = r.width;
+      ctx.globalAlpha = k * 0.18;
+      ctx.lineWidth = r.width * 4 * k;
       ctx.beginPath();
       ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.globalAlpha = k;
+      ctx.lineWidth = Math.max(0.5, r.width * k); ctx.stroke();
     }
     for (const p of fx.particles) {
       if (!p.active) continue;
@@ -565,9 +533,13 @@ export class Renderer {
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(p.x - p.vx * 0.03, p.y - p.vy * 0.03);
         ctx.stroke();
+      } else if (p.kind === 2) {
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx) + p.life * 3);
+        ctx.fillStyle = p.color; ctx.beginPath(); ctx.moveTo(p.size, 0); ctx.lineTo(0, p.size * 0.4); ctx.lineTo(-p.size, 0); ctx.lineTo(0, -p.size * 0.4); ctx.closePath(); ctx.fill(); ctx.restore();
       } else {
         ctx.fillStyle = p.color;
-        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+        circle(ctx, p.x, p.y, p.size * (0.3 + 0.7 * p.life / p.max));
+        ctx.fill();
       }
     }
     for (const a of fx.arcs) {
@@ -586,7 +558,10 @@ export class Renderer {
         ctx.lineTo(a.from.x + dx * k + (-dy / len) * j, a.from.y + dy * k + (dx / len) * j);
       }
       ctx.lineTo(a.to.x, a.to.y);
+      ctx.globalAlpha *= 0.22; ctx.lineWidth = 10; ctx.stroke();
+      ctx.globalAlpha = a.life / 0.25; ctx.lineWidth = 3;
       ctx.stroke();
+      ctx.strokeStyle = '#f3ffff'; ctx.lineWidth = 1; ctx.stroke();
     }
     ctx.globalCompositeOperation = 'source-over';
     ctx.textAlign = 'center';

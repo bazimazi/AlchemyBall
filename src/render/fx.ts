@@ -13,7 +13,7 @@ export interface Particle {
   size: number;
   color: string;
   drag: number;
-  kind: 0 | 1 | 2; // 0 dot, 1 spark (streak), 2 ring
+  kind: 0 | 1 | 2; // 0 mote, 1 spark (streak), 2 crystal shard
   active: boolean;
 }
 
@@ -71,14 +71,21 @@ export class Fx {
       this.particles.push({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, size: 2, color: '#fff', drag: 2, kind: 0, active: false });
   }
 
+  /** Presentation belongs to an encounter; never carry a frozen burst into the next room. */
+  reset(): void {
+    for (const p of this.particles) p.active = false;
+    this.texts = []; this.arcs = []; this.rings = [];
+    this.shake = 0; this.flash = 0; this.hitstop = 0;
+  }
+
   emit(x: number, y: number, n: number, color: string, speed: number, opts: Partial<Pick<Particle, 'size' | 'drag' | 'kind'>> & { life?: number; dir?: Vec2; spread?: number } = {}): void {
-    const count = Math.max(1, Math.round(n * this.quality));
+    const count = Math.max(1, Math.round(n * this.quality * (this.reducedMotion ? 0.4 : 1)));
     for (let i = 0; i < count; i++) {
       const p = this.particles[this.cursor];
       this.cursor = (this.cursor + 1) % this.particles.length;
       let a = Math.random() * Math.PI * 2;
       if (opts.dir) a = Math.atan2(opts.dir.y, opts.dir.x) + (Math.random() - 0.5) * (opts.spread ?? 1.2);
-      const s = speed * (0.35 + Math.random() * 0.65);
+      const s = speed * (0.35 + Math.random() * 0.65) * (this.reducedMotion ? 0.4 : 1);
       p.x = x;
       p.y = y;
       p.vx = Math.cos(a) * s;
@@ -94,6 +101,7 @@ export class Fx {
 
   ring(x: number, y: number, maxR: number, color: string, life = 0.45, width = 4): void {
     this.rings.push({ x, y, r: 4, maxR, color, life, max: life, width });
+    if (this.rings.length > 80) this.rings.shift();
   }
 
   text(x: number, y: number, text: string, color: string, size = 18, life = 0.9): void {
@@ -117,6 +125,7 @@ export class Fx {
         const n = Math.min(14, 2 + e.speed / 120);
         const color = e.material === 'bumper' ? '#ff4fa3' : e.material === 'slam' ? '#ffd9a0' : '#e8eef7';
         this.emit(e.pos.x, e.pos.y, n, color, e.speed * 0.35, { kind: 1, dir: e.normal, spread: 1.6, life: 0.3, size: 2 });
+        if (e.speed > 450) this.ring(e.pos.x, e.pos.y, 20 + e.speed * 0.025, color, 0.25, 2);
         if (e.speed > 700) this.addShake(e.speed / 300);
         break;
       }
@@ -138,7 +147,10 @@ export class Fx {
         const big = Math.max(60, e.radius);
         this.ring(e.pos.x, e.pos.y, big, e.color, 0.5, 5);
         this.ring(e.pos.x, e.pos.y, big * 0.6, '#ffffff', 0.3, 2);
-        this.emit(e.pos.x, e.pos.y, 18 + e.targets * 3, e.color, 380, { life: 0.7, size: 4, drag: 2.5 });
+        const crystal = r?.inputs.includes('ice') || r?.inputs.includes('earth');
+        const charged = r?.inputs.includes('lightning');
+        this.emit(e.pos.x, e.pos.y, 18 + e.targets * 3, e.color, 380, { life: 0.7, size: crystal ? 6 : 3, drag: 2.5, kind: crystal ? 2 : charged ? 1 : 0 });
+        this.emit(e.pos.x, e.pos.y, 10, '#fff4d6', 520, { life: 0.35, kind: 1, size: 2, drag: 3 });
         this.text(e.pos.x, e.pos.y - 34 - e.depth * 14, r?.name ?? e.reactionId, e.color, 17 + (r?.rarity === 'rare' ? 5 : 0), 1.1);
         this.addShake(2 + e.targets);
         if (e.depth >= 2) this.addFlash(e.color, 0.12);
@@ -165,6 +177,7 @@ export class Fx {
         this.addShake(5);
         break;
       case 'launch':
+        this.ring(e.pos.x, e.pos.y, 48, '#c6f2ef', 0.35, 2);
         this.emit(e.pos.x, e.pos.y, 10, '#ffffff', 200, { dir: { x: -e.dir.x, y: -e.dir.y }, spread: 0.9, life: 0.35, kind: 1 });
         break;
       case 'zoneSpawned': {
@@ -173,7 +186,7 @@ export class Fx {
         break;
       }
       case 'status':
-        if (e.status === 'frozen') this.emit(e.pos.x, e.pos.y, 10, '#bdf3ff', 160, { life: 0.5 });
+        if (e.status === 'frozen') this.emit(e.pos.x, e.pos.y, 10, '#bdf3ff', 160, { life: 0.5, kind: 2, size: 5 });
         break;
       case 'bossPhase':
         this.addShake(12);
