@@ -24,12 +24,13 @@ try {
   await page.screenshot({ animations: 'disabled', path: `${out}/desktop-menu.png` });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ animations: 'disabled', path: `${out}/mobile-menu.png` });
-  const launchBox = await page.locator('button.primary').boundingBox();
+  const launchBox = await page.locator('button.cta').boundingBox();
   assert(launchBox && launchBox.y >= 0 && launchBox.y + launchBox.height <= 844, 'Launch action must be visible');
   assert.equal(await page.evaluate(() => document.querySelector('.screen').scrollWidth > innerWidth), false, 'Mobile menu overflows horizontally');
-  await page.locator('button.primary').click();
+  await page.locator('button.cta').click();
+  await page.waitForTimeout(500);
   await page.screenshot({ animations: 'disabled', path: `${out}/mobile-map.png` });
-  await page.locator('.room-card').first().click();
+  await page.locator('.map-node:not([disabled])').first().click();
   await page.waitForTimeout(4500);
   await page.mouse.move(195, 590); await page.mouse.down(); await page.mouse.move(195, 740, { steps: 8 });
   await page.screenshot({ animations: 'disabled', path: `${out}/mobile-aim.png` });
@@ -77,11 +78,16 @@ try {
     const a = window.alchemy;
     const aim = { active: false, dir: { x: 0, y: -1 }, power: 0 };
     a.fx.shake = 10;
+    const c = a.renderer.canvas, g = c.getContext('2d');
     a.renderer.draw(a.session.world, a.fx, undefined, aim, 0);
-    const before = a.renderer.canvas.toDataURL();
+    const d1 = g.getImageData(0, 0, c.width, c.height).data;
     a.renderer.draw(a.session.world, a.fx, undefined, aim, 0);
+    const d2 = g.getImageData(0, 0, c.width, c.height).data;
     a.fx.shake = 0;
-    return before === a.renderer.canvas.toDataURL();
+    // A shaking frame shifts the whole arena (tens of thousands of pixels); allow only rasteriser noise.
+    let diff = 0;
+    for (let i = 0; i < d1.length; i += 4) if (d1[i] !== d2[i] || d1[i + 1] !== d2[i + 1] || d1[i + 2] !== d2[i + 2]) diff++;
+    return diff < (d1.length / 4) * 0.0005;
   });
   assert(stablePause, 'A paused frame must not keep shaking');
   const timing = await page.evaluate(() => {

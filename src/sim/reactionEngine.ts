@@ -135,7 +135,9 @@ export class ReactionEngine {
 
     if (target.kind === 'enemy') {
       const e = target as Enemy;
-      const resist = (e.def.resist?.[element] ?? 1) * (e.adapt.get(element) ?? 1);
+      let resist = (e.def.resist?.[element] ?? 1) * (e.adapt.get(element) ?? 1);
+      // Insulated affix: immune to the ball's core element, so the player must borrow another.
+      if (e.affixes.includes('insulated') && element === this.world.ball.coreElement) resist = 0;
       amount *= resist;
       if (amount <= 0.01) return { kind: 'ignored' };
       if (e.def.adaptive && def.tier !== 'hidden') this.world.adaptTo(e, element);
@@ -191,7 +193,13 @@ export class ReactionEngine {
 
     if (w.mods.lifesteal) w.healBall(w.mods.lifesteal);
     if (w.mods.iceArmor && (r.inputs.includes('ice') || r.id === 'freeze' || r.id === 'freeze_pool')) w.ball.shield = Math.min(40, w.ball.shield + w.mods.iceArmor);
-    w.onReaction(r);
+    if (r.id === 'shatter' && w.mods.shatterSpread) {
+      for (const t of w.chainTargetsAround(holder, 160).filter((x) => x.kind === 'enemy' && !(x as Enemy).isBoss).slice(0, 3)) {
+        w.emit({ type: 'arc', from: { ...holder.pos }, to: { ...t.pos }, element: 'ice' });
+        w.setStatus(t, 'frozen', 2);
+      }
+    }
+    w.onReaction(r, holder);
     w.emit({
       type: 'reaction', reactionId: r.id, pos: { ...holder.pos }, holderKind: holder.kind, holderUid: holder.uid,
       depth: ctx.depth, targets: stats.targets, kills: stats.kills, onBoss: stats.onBoss, color, radius: Math.max(stats.radius, holder.radius * 2),
@@ -213,6 +221,7 @@ export class ReactionEngine {
         let dmg = eff.amount * potency;
         if (r.inputs.includes('lightning')) dmg *= 1 + (w.mods.lightningDmg ?? 0);
         if (r.id === 'shatter') dmg *= 1 + (w.mods.shatterDmg ?? 0);
+        for (const el of new Set([r.inputs[0], r.inputs[1], partner])) dmg *= 1 + (w.mods[`dmg_${el}`] ?? 0);
         for (const t of targets) {
           let d = dmg;
           if (eff.tagMul) for (const [tag, m] of Object.entries(eff.tagMul)) if (t.tags.includes(tag) || (tag === 'brittle' && t.statuses.has('petrified'))) d *= m;

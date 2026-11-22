@@ -15,7 +15,7 @@ export interface EncounterSpec {
   walls: Wall[];
   objects: { id: string; x: number; y: number }[];
   zones: { id: string; x: number; y: number; r: number }[];
-  waves: { enemies: { id: string; x: number; y: number }[] }[];
+  waves: { enemies: { id: string; x: number; y: number; affixes?: string[] }[] }[];
   boss?: string;
   objective: string;
 }
@@ -34,7 +34,29 @@ export interface WorldOptions {
   seed: number;
   /** Lab/sandbox: ball cannot die, enemies respawn on demand. */
   sandbox?: boolean;
+  /** Heat / region / endless scaling. */
+  difficulty?: Partial<Difficulty>;
 }
+
+/** Multipliers applied by Heat, region tier and endless depth. */
+export interface Difficulty {
+  enemyHp: number;
+  enemySpeed: number;
+  enemyDmg: number;
+  bossHp: number;
+  /** >1 = boss attacks come faster. */
+  bossTempo: number;
+  pipRegen: number;
+  /** Assist mode: fraction of all damage to the ball that is ignored. */
+  playerResist: number;
+}
+
+export const NORMAL_DIFFICULTY: Difficulty = { enemyHp: 1, enemySpeed: 1, enemyDmg: 1, bossHp: 1, bossTempo: 1, pipRegen: 1, playerResist: 0 };
+
+/** Zones left behind by Elemental Wake, keyed by carried element. */
+const WAKE_ZONE: Record<string, string> = {
+  fire: 'fire_patch', ice: 'ice_patch', poison: 'toxic_pool', water: 'water_pool', lightning: 'storm_cloud', steam: 'steam_cloud', magma: 'magma_pool', earth: 'mud_patch',
+};
 
 const MAX_ZONES = 24;
 const MAX_PROJECTILES = 80;
@@ -59,7 +81,11 @@ export class World {
   readonly shell?: ShellDef;
   readonly spec: EncounterSpec;
   readonly sandbox: boolean;
+  readonly diff: Difficulty;
   boss?: BossController;
+  /** Set while a boss death clears its adds, so on-kill effects don't fire for the purge. */
+  purging = false;
+  private plagueTimer = 0;
   time = 0;
   wave = -1;
   waveTimer = 0;
@@ -83,6 +109,7 @@ export class World {
     this.shell = opts.shell;
     this.potency = opts.potency;
     this.sandbox = !!opts.sandbox;
+    this.diff = { ...NORMAL_DIFFICULTY, ...(opts.difficulty ?? {}) };
     this.engine = new ReactionEngine(this);
     const W = PHYS.arenaW;
     const H = PHYS.arenaH;
@@ -92,7 +119,7 @@ export class World {
       hp: opts.hp, maxHp: opts.maxHp, shield: 0, coreElement: opts.coreElement,
       pips: opts.maxPips, maxPips: opts.maxPips, pipTimer: 0,
       focus: PHYS.maxFocus * (1 + (opts.mods.focus ?? 0)), maxFocus: PHYS.maxFocus * (1 + (opts.mods.focus ?? 0)),
-      buffs: new Map(), invuln: 0, brakeCd: 0, sinceLaunch: 99,
+      buffs: new Map(), invuln: 0, brakeCd: 0, sinceLaunch: 99, bounces: 0, combo: 0, restTimer: 0, trailTimer: 0,
     };
     // Border walls (slightly chamfered corners so the ball never wedges).
     const c = 40;
@@ -167,7 +194,7 @@ export class World {
     b.brakeCd = Math.max(0, b.brakeCd - dt);
     b.sinceLaunch += dt;
     if (b.pips < b.maxPips) {
-      b.pipTimer += dt * (1 + (this.mods.pipRegen ?? 0));
+      b.pipTimer += dt * (1 + (this.mods.pipRegen ?? 0)) * this.diff.pipRegen;
       if (b.pipTimer >= PHYS.pipRegen) {
         b.pipTimer = 0;
         b.pips++;
@@ -178,6 +205,7 @@ export class World {
       decay(e, e.def.innate && !e.isBoss ? { element: e.def.innate.element, amount: e.def.innate.amount, regen: 0.3 } : this.boss?.innateFor(e));
       e.hitFlash = Math.max(0, e.hitFlash - dt);
       e.spawnFx = Math.max(0, e.spawnFx - dt);
+      if (e.affixes.includes('regenerating') && !e.dead && this.time - e.lastHurt > 2) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.03 * dt);
       // Passive aura effects on enemies.
       if (e.spawnFx > 0) continue;
       let dps = 0;
@@ -208,6 +236,23 @@ export class World {
       z.ttl -= dt;
     }
     for (const [k, t] of this.contactCd) (t - dt <= 0 ? this.contactCd.delete(k) : this.contactCd.set(k, t - dt));
+    if (this.mods.plague) this.updatePlague(dt);
+  }
+
+  /** Plague Lord: poison hops from each poisoned foe to its nearest clean neighbour once a second. */
+  private updatePlague(dt: number): void {
+    this.plagueTimer -= dt;
+    if (this.plagueTimer > 0) return;
+    this.plagueTimer = 1;
+    let spreads = 0;
+    for (const e of this.enemies) {
+      if (e.dead || e.spawnFx > 0 || (e.auras.get('poison') ?? 0) < 0.2 || spreads >= 6) continue;
+      const t = this.chainTargetsAround(e, 150).find((x) => x.kind === 'enemy' && (x.auras.get('poison') ?? 0) < 0.2);
+      if (!t) continue;
+      spreads++;
+      this.emit({ type: 'arc', from: { ...e.pos }, to: { ...t.pos }, element: 'poison' });
+      this.engine.apply(t, 'poison', 0.5, { depth: 1, faction: 'player' });
+    }
   }
 
   private updateWaves(dt: number): void {
@@ -220,7 +265,8 @@ export class World {
     if (!ready) return;
     this.wave = next;
     this.waveTimer = 0;
-    for (const s of waves[next].enemies) this.spawnEnemy(s.id, { x: s.x, y: s.y });
+    for (const s of waves[next].enemies) this.spawnEnemy(s.id, { x: s.x, y: s.y }, { affixes: s.affixes });
+    if (this.mods.waveShield) this.ball.shield = Math.max(this.ball.shield, this.mods.waveShield);
     this.emit({ type: 'waveStart', wave: next + 1, total: waves.length });
   }
 
@@ -240,7 +286,10 @@ export class World {
         const sp = PHYS.launchSpeed * ph.launchMul * power;
         b.vel = { x: dir.x * sp, y: dir.y * sp };
         b.sinceLaunch = 0;
+        b.bounces = 0;
+        b.restTimer = 0;
         this.emit({ type: 'launch', pos: { ...b.pos }, dir, power });
+        this.onLaunchEffects();
       }
     }
     if (this.pendingBrake) {
@@ -248,6 +297,7 @@ export class World {
       b.vel = { x: b.vel.x * PHYS.brakeFactor, y: b.vel.y * PHYS.brakeFactor };
       b.brakeCd = PHYS.brakeCooldown;
       this.emit({ type: 'brake', pos: { ...b.pos } });
+      if (this.mods.brakeNova) this.nova(b.pos, 140 * Math.min(1.4, this.mods.brakeNova), 15 * this.mods.brakeNova, b.coreElement, 0.5, 420);
     }
 
     // Zone floor effects on drag, currents.
@@ -290,6 +340,19 @@ export class World {
       speed = maxSp;
     }
     if (speed < 4) b.vel.x = b.vel.y = 0;
+    // The shot combo survives while the ball keeps moving (or is relaunched quickly).
+    if (speed < PHYS.restSpeed) {
+      b.restTimer += dt;
+      if (b.restTimer > 0.6 && b.combo > 0) this.endCombo();
+    } else b.restTimer = 0;
+    if (this.mods.trail && speed > 650) {
+      b.trailTimer -= dt;
+      if (b.trailTimer <= 0) {
+        b.trailTimer = 0.14;
+        const carried = [...b.auras.entries()].filter(([el]) => WAKE_ZONE[el]).sort((x, y) => y[1] - x[1])[0];
+        if (carried && carried[1] > 0.2) this.spawnZone(WAKE_ZONE[carried[0]], b.pos, 34, 1.6, 'player', 1);
+      }
+    }
 
     // Continuous-enough collision: substep so the ball never moves more than 40% of its radius.
     const steps = Math.min(16, Math.max(1, Math.ceil((speed * dt) / (b.radius * 0.4))));
@@ -326,6 +389,10 @@ export class World {
         if (sp < 550) (b.vel.x *= 550 / Math.max(1, sp)), (b.vel.y *= 550 / Math.max(1, sp));
       }
       if (-vn > 60) this.emit({ type: 'impact', pos: { ...cp }, speed: -vn, material: w.material, normal: n });
+      if (-vn > 200) {
+        b.bounces++;
+        if (this.mods.perpetual && b.pips < b.maxPips) this.refundPip(0.25);
+      }
       if (-vn > 900) this.fastImpact(cp, -vn);
     }
     // Hard clamp in case of tunnelling through the border.
@@ -361,7 +428,7 @@ export class World {
       this.contactCd.set(o.uid, 0.15);
       if (speed > PHYS.impactMinSpeed) {
         this.engine.apply(o, 'kinetic', speed / PHYS.impactRefSpeed, { depth: 0, impactSpeed: speed, faction: 'player' });
-        if (o.def.hp !== undefined) this.damageHolder(o, PHYS.baseImpactDamage * (speed / PHYS.impactRefSpeed) * impactMul * Math.sqrt(mass), 'impact');
+        if (o.def.hp !== undefined) this.damageHolder(o, PHYS.baseImpactDamage * (speed / PHYS.impactRefSpeed) * impactMul * this.ricochetMul() * Math.sqrt(mass), 'impact');
         if (speed > 900) this.fastImpact(o.pos, speed);
       }
       this.exchangeAuras(b, o, speed);
@@ -392,6 +459,8 @@ export class World {
       }
       const rel = (b.vel.x - e.vel.x) * n.x + (b.vel.y - e.vel.y) * n.y;
       if (rel <= 0) continue;
+      // The ball must itself be driving into the target: an enemy ramming a resting ball is not the ball's hit.
+      const approach = b.vel.x * n.x + b.vel.y * n.y;
       const r = rest * 0.95;
       const j = ((1 + r) * rel) / (1 / mass + 1 / (immovable(e) ? 1e9 : em));
       b.vel.x -= (j / mass) * n.x;
@@ -403,23 +472,44 @@ export class World {
       if (this.contactCd.has(e.uid)) continue;
       this.contactCd.set(e.uid, 0.12);
       const ballSpeed = vlen(b.vel);
-      if (rel > PHYS.impactMinSpeed) {
+      if (rel > PHYS.impactMinSpeed && approach > PHYS.impactMinSpeed * 0.6) {
         // Kinetic first: impact reactions (shatter) see the target's state before elements change it.
         this.engine.apply(e, 'kinetic', rel / PHYS.impactRefSpeed, { depth: 0, impactSpeed: rel, faction: 'player' });
-        let dmg = PHYS.baseImpactDamage * (rel / PHYS.impactRefSpeed) * impactMul * Math.sqrt(mass);
+        let dmg = PHYS.baseImpactDamage * (rel / PHYS.impactRefSpeed) * impactMul * this.ricochetMul() * Math.sqrt(mass);
+        const crit = !!this.mods.critChance && this.rng.chance(this.mods.critChance);
+        if (crit) dmg *= 2 + (this.mods.critMul ?? 0);
         const armored = e.armor > 0 && !e.statuses.has('exposed');
-        this.damageHolder(e, dmg, 'impact');
-        this.emit({ type: 'hit', pos: { x: b.pos.x + n.x * b.radius, y: b.pos.y + n.y * b.radius }, targetUid: e.uid, damage: dmg, speed: rel, armored });
+        const bounces = b.bounces;
+        this.bumpCombo(e.pos);
+        this.damageHolder(e, dmg, 'impact', undefined, undefined, false, crit);
+        this.emit({ type: 'hit', pos: { x: b.pos.x + n.x * b.radius, y: b.pos.y + n.y * b.radius }, targetUid: e.uid, damage: dmg, speed: rel, armored, crit, bounces, normal: n });
+        const exec = this.mods.execute ?? 0;
+        if (exec && !e.dead && !e.isBoss && e.ward <= 0 && e.hp / e.maxHp < exec) {
+          this.emit({ type: 'execute', pos: { ...e.pos } });
+          e.hp = 0;
+          this.killEnemy(e);
+        }
         if (rel > 900) this.fastImpact(e.pos, rel);
+        if (this.mods.quake && rel > 500) this.nova(e.pos, 120, 10 * this.mods.quake, undefined, 0, 360);
         if (b.buffs.has('ballLightning')) {
           for (const t of this.chainTargetsAround(e, 200).slice(0, 3)) {
             this.emit({ type: 'arc', from: { ...e.pos }, to: { ...t.pos }, element: 'lightning' });
             this.damageHolder(t, 12, 'reaction', 'ball_lightning');
           }
         }
+        if (this.mods.arcOnHit && (b.auras.get('lightning') ?? 0) > 0.2) {
+          for (const t of this.chainTargetsAround(e, 190).filter((x) => x.kind === 'enemy').slice(0, Math.round(this.mods.arcOnHit))) {
+            this.emit({ type: 'arc', from: { ...e.pos }, to: { ...t.pos }, element: 'lightning' });
+            this.damageHolder(t, 8, 'reaction', 'galvanic', 'lightning');
+            this.engine.apply(t, 'lightning', 0.3, { depth: 1, faction: 'player' });
+          }
+        }
         dmg = 0;
       } else if (ballSpeed < PHYS.vulnerableSpeed && e.def.contactDamage > 0 && !e.statuses.has('frozen') && !e.statuses.has('stunned')) {
-        this.hurtBall(e.def.contactDamage * (e.isBoss ? 1.5 : 1), e.def.name);
+        const heavy = (b.auras.get('metal') ?? 0) > 0.2 || (b.auras.get('earth') ?? 0) > 0.2;
+        const guard = heavy ? 1 - Math.min(0.7, this.mods.heavyGuard ?? 0) : 1;
+        this.hurtBall(e.def.contactDamage * e.dmgMul * guard * (e.isBoss ? 1.5 : 1), e.def.name);
+        if (this.mods.thorns && !e.dead) this.damageHolder(e, this.mods.thorns, 'reaction', 'thorns');
       }
       this.exchangeAuras(b, e, rel);
     }
@@ -454,18 +544,86 @@ export class World {
     this.impulseFrom(pos, 380, 110);
   }
 
+  /** A burst around a point: damage, knockback and (optionally) an element splash on foes. */
+  nova(pos: Vec2, radius: number, damage: number, element: string | undefined, amount: number, push: number): void {
+    const at = { pos, radius: 0, kind: 'ball', uid: -1 } as unknown as AnyHolder;
+    for (const t of this.damageTargetsAround(at, radius)) {
+      if (damage > 0) this.damageHolder(t, damage, 'reaction', 'nova', element);
+      if (element && amount > 0 && !t.dead && t.kind === 'enemy') this.engine.apply(t, element, amount, { depth: 1, faction: 'player' });
+    }
+    if (push > 0) this.impulseFrom(pos, push, radius);
+    this.emit({ type: 'zoneSpawned', pos: { ...pos }, zone: element ? WAKE_ZONE[element] ?? 'steam_cloud' : 'steam_cloud', radius });
+  }
+
+  /** Launch-triggered upgrades: Launch Flare (element splash) and Thunderhead (sky strikes). */
+  private onLaunchEffects(): void {
+    const b = this.ball;
+    if (this.mods.launchNova) this.nova(b.pos, 110, 0, b.coreElement, 0.5 * this.mods.launchNova, 0);
+    if (this.mods.thunderLaunch) {
+      const targets = this.enemies.filter((e) => !e.dead && e.spawnFx <= 0).sort((x, y) => vdist2(x.pos, b.pos) - vdist2(y.pos, b.pos) || x.uid - y.uid);
+      for (const t of targets.slice(0, Math.round(this.mods.thunderLaunch))) {
+        this.emit({ type: 'arc', from: { x: t.pos.x, y: t.pos.y - 220 }, to: { ...t.pos }, element: 'lightning' });
+        this.damageHolder(t, 20, 'reaction', 'thunderhead', 'lightning');
+        if (!t.dead) this.engine.apply(t, 'lightning', 0.5, { depth: 1, faction: 'player' });
+      }
+    }
+  }
+
+  /** Ricochet: each wall bounce this launch adds impact damage. */
+  ricochetMul(): number {
+    const r = this.mods.ricochet ?? 0;
+    if (!r) return 1;
+    return 1 + Math.min(this.ball.bounces, this.mods.perpetual ? 10 : 5) * r;
+  }
+
+  /** Combo damage bonus (Combo Engine). */
+  comboMul(): number {
+    const c = this.mods.comboDmg ?? 0;
+    return c ? 1 + Math.min(10, this.ball.combo) * c : 1;
+  }
+
+  private refundPip(frac: number): void {
+    const b = this.ball;
+    if (b.pips >= b.maxPips) return;
+    b.pipTimer += PHYS.pipRegen * frac;
+    while (b.pipTimer >= PHYS.pipRegen && b.pips < b.maxPips) {
+      b.pipTimer -= PHYS.pipRegen;
+      b.pips++;
+    }
+    if (b.pips >= b.maxPips) b.pipTimer = 0;
+  }
+
+  bumpCombo(pos: Vec2): void {
+    const b = this.ball;
+    b.combo++;
+    b.restTimer = 0;
+    this.emit({ type: 'combo', count: b.combo, pos: { ...pos } });
+  }
+
+  private endCombo(): void {
+    const b = this.ball;
+    if (b.combo >= 3) this.emit({ type: 'comboEnd', count: b.combo, pos: { ...b.pos }, essence: Math.floor((b.combo * b.combo) / 40) });
+    b.combo = 0;
+  }
+
   // ─── Enemies ──────────────────────────────────────────────────────────────
-  spawnEnemy(id: string, pos: Vec2, opts?: { isBoss?: boolean; hp?: number; radius?: number; mass?: number; armor?: number }): Enemy {
+  spawnEnemy(id: string, pos: Vec2, opts?: { isBoss?: boolean; hp?: number; radius?: number; mass?: number; armor?: number; affixes?: string[] }): Enemy {
     const def = Content.enemies.get(id);
     if (!def) throw new Error(`Unknown enemy '${id}'`);
+    const affixes = (opts?.affixes ?? []).filter((a) => Content.affixes.has(a));
+    const hp = opts?.hp ?? def.hp * (opts?.isBoss || this.sandbox ? 1 : this.diff.enemyHp);
     const e: Enemy = {
       uid: this.nextUid(), kind: 'enemy', pos: { ...pos }, vel: { x: 0, y: 0 }, radius: opts?.radius ?? def.radius,
       auras: new Map(def.innate ? [[def.innate.element, def.innate.amount]] : []), cooldowns: new Map(), statuses: new Map(),
-      tags: def.tags, faction: 'hostile', dead: false, def, hp: opts?.hp ?? def.hp, maxHp: opts?.hp ?? def.hp, mass: opts?.mass ?? def.mass,
+      tags: def.tags, faction: 'hostile', dead: false, def, hp, maxHp: hp, mass: opts?.mass ?? def.mass,
       armor: opts?.armor ?? def.armor, shootTimer: def.projectile ? def.projectile.interval * (0.5 + this.rng.next()) : 0,
       aiTimer: this.rng.range(0, 2), aiDir: this.rng.chance(0.5) ? 1 : -1, adapt: new Map(), adaptHits: new Map(), hitFlash: 0,
       isBoss: !!opts?.isBoss, spawnFx: opts?.isBoss ? 1.2 : 0.8,
+      affixes, ward: 0, maxWard: 0, lastHurt: 0,
+      dmgMul: (this.sandbox ? 1 : this.diff.enemyDmg) * (affixes.includes('enraged') ? 1.35 : 1),
+      speedMul: (this.sandbox ? 1 : this.diff.enemySpeed) * (affixes.includes('swift') ? 1.4 : 1),
     };
+    if (affixes.includes('shielded')) e.ward = e.maxWard = Math.round(hp * 0.35);
     this.enemies.push(e);
     return e;
   }
@@ -478,7 +636,7 @@ export class World {
 
   enemySpeedMul(e: Enemy): number {
     if (e.statuses.has('frozen') || e.statuses.has('stunned')) return 0;
-    let m = 1;
+    let m = e.speedMul;
     if (e.statuses.has('slowed')) m *= 0.5;
     if (e.statuses.has('petrified')) m *= 0.3;
     for (const [el, amt] of e.auras) {
@@ -636,7 +794,7 @@ export class World {
         // Lead the target slightly, but never perfectly.
         const lead = Math.min(0.35, dist / p.speed) * 0.5;
         const aim = vnorm(vsub({ x: b.pos.x + b.vel.x * lead, y: b.pos.y + b.vel.y * lead }, e.pos));
-        this.spawnProjectile(e.pos, { x: aim.x * p.speed, y: aim.y * p.speed }, p.radius, p.damage, p.element, 'hostile');
+        this.spawnProjectile(e.pos, { x: aim.x * p.speed, y: aim.y * p.speed }, p.radius, p.damage * e.dmgMul, p.element, 'hostile');
         this.emit({ type: 'shoot', pos: { ...e.pos }, element: p.element });
       }
     }
@@ -687,16 +845,22 @@ export class World {
     }
   }
 
-  addTelegraph(pos: Vec2, radius: number, dur: number, damage: number, color: string): void {
-    this.telegraphs.push({ uid: this.nextUid(), pos: { ...pos }, radius, t: 0, dur, damage, color });
-    this.emit({ type: 'telegraph', pos: { ...pos }, radius });
+  addTelegraph(pos: Vec2, radius: number, dur: number, damage: number, color: string, extra: Partial<Pick<Telegraph, 'cause' | 'kind' | 'dir' | 'length' | 'fire'>> = {}): Telegraph {
+    const t: Telegraph = { uid: this.nextUid(), pos: { ...pos }, radius, t: 0, dur, damage, color, cause: extra.cause ?? 'Crucible Slam', kind: extra.kind ?? 'circle', dir: extra.dir, length: extra.length, fire: extra.fire };
+    this.telegraphs.push(t);
+    this.emit({ type: 'telegraph', pos: { ...pos }, radius, kind: t.kind });
+    return t;
   }
 
   private updateTelegraphs(dt: number): void {
     for (const t of this.telegraphs) {
       t.t += dt;
       if (t.t >= t.dur) {
-        if (vdist(this.ball.pos, t.pos) < t.radius + this.ball.radius) this.hurtBall(t.damage, 'Crucible Slam');
+        if (t.fire) {
+          t.fire();
+          continue;
+        }
+        if (vdist(this.ball.pos, t.pos) < t.radius + this.ball.radius) this.hurtBall(t.damage, t.cause);
         this.impulseFrom(t.pos, 500, t.radius, undefined, true);
         this.emit({ type: 'impact', pos: { ...t.pos }, speed: 1200, material: 'slam', normal: { x: 0, y: -1 } });
       }
@@ -836,7 +1000,7 @@ export class World {
   }
 
   /** Returns true if the target died from this damage. */
-  damageHolder(t: AnyHolder, amount: number, source: 'impact' | 'reaction' | 'dot', reactionId?: string, element?: string, silent = false): boolean {
+  damageHolder(t: AnyHolder, amount: number, source: 'impact' | 'reaction' | 'dot', reactionId?: string, element?: string, silent = false, crit = false): boolean {
     if (t.dead || amount <= 0) return false;
     if (t.kind === 'enemy') {
       const e = t as Enemy;
@@ -846,11 +1010,26 @@ export class World {
       if (source === 'impact' && !exposed) d *= 1 - e.armor;
       if (exposed) d *= 1.5;
       if (source === 'reaction') d *= 1 + (this.mods.reactionDmg ?? 0);
+      if (source !== 'dot') d *= this.comboMul();
       if (e.isBoss && this.boss) d = this.boss.filterDamage(d, source);
+      e.lastHurt = this.time;
+      if (e.ward > 0) {
+        const absorbed = Math.min(e.ward, d);
+        e.ward -= absorbed;
+        d -= absorbed;
+        if (e.ward <= 0) {
+          e.ward = 0;
+          this.emit({ type: 'wardBroken', pos: { ...e.pos } });
+        }
+        if (d <= 0) {
+          e.hitFlash = 0.08;
+          return false;
+        }
+      }
       e.hp -= d;
       if (!silent || d > 3) e.hitFlash = 0.1;
       if (reactionId) e.lastHitBy = reactionId;
-      if (!silent) this.emit({ type: 'damage', pos: { ...e.pos }, amount: d, element, crit: d >= 30 });
+      if (!silent) this.emit({ type: 'damage', pos: { ...e.pos }, amount: d, element, crit: crit || d >= 30 });
       if (e.hp <= 0) {
         this.killEnemy(e);
         return true;
@@ -874,9 +1053,38 @@ export class World {
 
   private killEnemy(e: Enemy): void {
     e.dead = true;
-    this.emit({ type: 'kill', pos: { ...e.pos }, enemyId: e.def.id, essence: e.def.essence, isBoss: e.isBoss, byReaction: e.lastHitBy });
+    this.emit({ type: 'kill', pos: { ...e.pos }, enemyId: e.def.id, essence: e.def.essence, isBoss: e.isBoss, byReaction: e.lastHitBy, combo: this.ball.combo, elite: e.tags.includes('elite') });
     this.runStandaloneEffects(e.def.onDeath, e, 'hostile');
-    if (e.isBoss) this.boss?.onDeath();
+    if (e.isBoss) {
+      this.boss?.onDeath();
+      return;
+    }
+    if (this.purging) return;
+    const m = this.mods;
+    if (e.affixes.includes('volatile')) {
+      const pos = { ...e.pos };
+      this.addTelegraph(pos, 85, 0.9, 12 * this.diff.enemyDmg, '#ff7a2b', {
+        cause: 'Volatile Remains',
+        fire: () => {
+          if (vdist(this.ball.pos, pos) < 85 + this.ball.radius) this.hurtBall(12 * this.diff.enemyDmg, 'Volatile Remains');
+          for (const t of this.damageTargetsAround({ pos, radius: 0, kind: 'ball', uid: -1 } as unknown as AnyHolder, 85)) this.damageHolder(t, 20, 'reaction', 'volatile');
+          this.impulseFrom(pos, 520, 85, undefined, true);
+          this.emit({ type: 'impact', pos, speed: 1100, material: 'slam', normal: { x: 0, y: -1 } });
+          this.emit({ type: 'zoneSpawned', pos, zone: 'fire_patch', radius: 85 });
+        },
+      });
+    }
+    if (m.killNova) this.nova(e.pos, 120, 8 * m.killNova, this.ball.coreElement, 0.5 * m.killNova, 200);
+    if (m.phoenix) {
+      for (const t of this.chainTargetsAround(e, 170).filter((x) => x.kind === 'enemy').slice(0, 4)) {
+        this.emit({ type: 'arc', from: { ...e.pos }, to: { ...t.pos }, element: 'fire' });
+        this.damageHolder(t, 14, 'reaction', 'phoenix', 'fire');
+        if (!t.dead) this.engine.apply(t, 'fire', 0.8, { depth: 1, faction: 'player' });
+      }
+      this.healBall(2);
+    }
+    if (m.toxicBloom && (e.auras.get('poison') ?? 0) > 0.1) this.spawnZone('poison_cloud', e.pos, 90, 4, 'player', 1);
+    if (m.pipOnKill) this.refundPip(0.5 * m.pipOnKill);
   }
 
   /** Effects not tied to a reaction (on-death, on-destroy). Supports the zone/chain/damage subset. */
@@ -930,8 +1138,10 @@ export class World {
     if (!continuous) {
       if (b.invuln > 0) return;
       b.invuln = 0.6;
+      this.endCombo();
       amount *= 1 - (this.shell?.mods.contactReduce ?? 0) * (source === 'Projectile' ? 0 : 1);
     }
+    amount *= 1 - this.diff.playerResist;
     if (b.shield > 0) {
       const s = Math.min(b.shield, amount);
       b.shield -= s;
@@ -963,9 +1173,11 @@ export class World {
     return this.potency.get(r.id) ?? 1;
   }
 
-  onReaction(r: ReactionDef): void {
+  onReaction(r: ReactionDef, holder: AnyHolder): void {
     this.reactionCount++;
     void r;
+    // Reactions extend the shot combo while the ball is in motion.
+    if (this.ball.combo > 0 || vlen(this.ball.vel) > PHYS.restSpeed) this.bumpCombo(holder.pos);
   }
 
   noteElementSeen(el: string): void {

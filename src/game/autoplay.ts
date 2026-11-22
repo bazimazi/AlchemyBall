@@ -25,9 +25,9 @@ export interface BotResult {
  * A simple scripted player used for balance simulation and soak tests. It is deliberately
  * mediocre: launches at the nearest enemy or at a random elemental source with aim noise.
  */
-export function botRun(opts: { seed: number; core: string; profile?: Profile; maxRoomSeconds?: number; skill?: number; heat?: number }): BotResult {
+export function botRun(opts: { seed: number; core: string; profile?: Profile; maxRoomSeconds?: number; skill?: number; heat?: number; regionId?: string; mode?: 'standard' | 'endless'; maxFloors?: number }): BotResult {
   const profile = opts.profile ?? freshProfile();
-  const run = new Run({ seed: opts.seed, mode: 'standard', regionId: 'cinder_marsh', core: opts.core, shell: 'glass', heat: opts.heat ?? 0, tutorial: false, maxPips: 3, rerolls: 0 });
+  const run = new Run({ seed: opts.seed, mode: opts.mode ?? 'standard', regionId: opts.regionId ?? 'cinder_marsh', core: opts.core, shell: 'glass', heat: opts.heat ?? 0, tutorial: false, maxPips: 3, rerolls: 0, regionCycle: ['cinder_marsh', 'frostvein', 'storm_spire'] });
   const tracker = new ProgressionTracker(profile, run, () => {});
   const rng = new Rng(opts.seed ^ 0xabc);
   const skill = opts.skill ?? 0.6;
@@ -36,7 +36,7 @@ export function botRun(opts: { seed: number; core: string; profile?: Profile; ma
   const roomSeconds: number[] = [];
   const coreEl = Content.cores.get(opts.core)!.element;
 
-  while (!run.finished) {
+  while (!run.finished && run.floor < (opts.maxFloors ?? Infinity)) {
     const room: RoomType = run.choices.includes('combat') ? 'combat' : run.choices[0];
     run.enter(room);
     if (room === 'rest') {
@@ -44,7 +44,7 @@ export function botRun(opts: { seed: number; core: string; profile?: Profile; ma
       run.completeRoom();
       continue;
     }
-    if (room === 'research') {
+    if (room === 'research' || room === 'merchant' || room === 'event') {
       run.completeRoom();
       continue;
     }
@@ -55,11 +55,12 @@ export function botRun(opts: { seed: number; core: string; profile?: Profile; ma
       continue;
     }
     const world = new World({
-      encounter: run.generateEncounter(room), coreElement: coreEl, maxHp: run.maxHp, hp: run.hp, mods: run.mods(),
+      encounter: run.generateEncounter(room), coreElement: coreEl, maxHp: run.maxHp, hp: run.hp, mods: run.mods(), difficulty: run.difficulty(),
       unlocks: new Set(profile.research), potency: potencyMap(profile), maxPips: run.maxPips, seed: rng.int(0, 1e9),
     });
     world.events.onAny((e) => tracker.handle(e));
     world.events.on('ballDied', (e) => (cause = e.cause));
+    world.events.on('comboEnd', () => {});
     const limit = (opts.maxRoomSeconds ?? 240) / PHYS.step;
     let steps = 0;
     while (!world.over && steps < limit) {

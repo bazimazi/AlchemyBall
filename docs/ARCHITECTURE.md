@@ -21,7 +21,7 @@ src/
     world.ts           fixed-step World: ball/enemy/zone/object/projectile update, collisions, damage API
     reactionEngine.ts  the only system that changes elemental state
     ballPhysics.ts     tunable constants (PHYS) + element/buff/shell/upgrade → physics mods
-    boss.ts            Crucible Warden controller (phases from data)
+    boss.ts            data-driven boss controller: phases, slam/flask/nova/charge telegraphs
     entities.ts        entity shapes (every reactive thing is a Holder)
     events.ts          SimEvent union: the simulation's only output channel
   game/        run & meta layer (pure logic, no DOM)
@@ -32,6 +32,10 @@ src/
     save.ts        versioned, checksummed, backed-up persistence + migrations
     autoplay.ts    scripted bot used by the simulator and the soak test
     analytics.ts   opt-in, local-only aggregate counters
+    feats.ts       achievements: checks, rewards, unlock cascade
+    contracts.ts   three goal slots: generation, live progress, claim/swap
+    challenges.ts  optional per-room bonus objectives
+    anomalies.ts   text events with deterministic bargains
   render/      Canvas renderer + procedural art + FX (pooled particles, rings, arcs, floating text)
   audio/       procedural WebAudio synth, adaptive drone, haptics
   ui/          DOM screens: app flow, session (loop + input + HUD), codex

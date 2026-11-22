@@ -1,12 +1,15 @@
 import { ELEMENTS } from './elements';
 import { REACTIONS } from './reactions';
 import { OBJECTS, ZONES } from './zones';
-import { BOSSES, ENEMIES } from './enemies';
+import { AFFIXES, BOSSES, ENEMIES } from './enemies';
 import { CORES, SHELLS, UPGRADES } from './build';
-import { MASTERY_LEVELS, REGIONS, RESEARCH } from './progression';
-import type { ElementDef, EnemyDef, ObjectDef, ReactionDef, ZoneDef, CoreDef, ShellDef, UpgradeDef, ResearchNode, RegionDef } from './types';
+import { ASPECTS, CORE_LEVELS, HEAT_LEVELS, MASTERY_LEVELS, REGIONS, RESEARCH } from './progression';
+import { COSMETICS, type CosmeticDef } from './cosmetics';
+import type { ElementDef, EnemyDef, ObjectDef, ReactionDef, ZoneDef, CoreDef, ShellDef, UpgradeDef, ResearchNode, RegionDef, AffixDef, AspectDef } from './types';
 
 export * from './types';
+export type { CosmeticDef } from './cosmetics';
+export { MAX_HEAT } from './progression';
 
 function indexById<T extends { id: string }>(list: T[]): Map<string, T> {
   const m = new Map<string, T>();
@@ -26,9 +29,14 @@ export const Content = {
   upgrades: indexById<UpgradeDef>(UPGRADES),
   research: indexById<ResearchNode>(RESEARCH),
   regions: indexById<RegionDef>(REGIONS),
+  affixes: indexById<AffixDef>(AFFIXES),
+  aspects: indexById<AspectDef>(ASPECTS),
+  cosmetics: indexById<CosmeticDef>(COSMETICS),
   bosses: BOSSES,
   masteryLevels: MASTERY_LEVELS,
-  lists: { ELEMENTS, REACTIONS, ZONES, OBJECTS, ENEMIES, CORES, SHELLS, UPGRADES, RESEARCH, REGIONS },
+  coreLevels: CORE_LEVELS,
+  heatLevels: HEAT_LEVELS,
+  lists: { ELEMENTS, REACTIONS, ZONES, OBJECTS, ENEMIES, CORES, SHELLS, UPGRADES, RESEARCH, REGIONS, AFFIXES, ASPECTS, COSMETICS },
 };
 
 export function element(id: string): ElementDef {
@@ -57,3 +65,8 @@ export const reactionsByPair: Map<string, ReactionDef[]> = (() => {
   for (const list of m.values()) list.sort((x, y) => (y.priority ?? 0) - (x.priority ?? 0));
   return m;
 })();
+
+/** Aspects available to a core, default first. */
+export function aspectsFor(core: string): AspectDef[] {
+  return ASPECTS.filter((a) => a.core === core).sort((a, b) => a.level - b.level);
+}

@@ -15,10 +15,10 @@ page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(url);
 await page.waitForTimeout(500);
 await page.screenshot({ path: `${out}/1-menu.png` });
-await page.getByText('Begin — First Experiment').click();
+await page.locator('button.cta').first().click();
 await page.waitForTimeout(300);
 await page.screenshot({ path: `${out}/2-map.png` });
-await page.locator('.room-card').first().click();
+await page.locator('.map-node:not([disabled])').first().click();
 await page.waitForTimeout(1200);
 
 async function launch(dx, dy, hold = 250) {

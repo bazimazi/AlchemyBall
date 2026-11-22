@@ -1,59 +1,92 @@
 # Roadmap and status
 
-Last updated: 2026-09-25.
+Last updated: 2026-11-20 (v0.4.0). The research behind v0.4 is in [RESEARCH.md](RESEARCH.md).
 
 ## Phase status
 
 | Phase | Status | Evidence |
 | --- | --- | --- |
-| 1. Core physics prototype | **Done** | Slingshot launch, brake, bullet-time aim, substepped collisions (no tunnelling at 5000 u/s, tested), materials (stone, bumper, metal), element-dependent physics, wall slams |
-| 2. Elemental reaction foundation | **Done** | Data-driven engine: 31 reactions across all 7 categories, context variants, zone reactions, chains with depth, budget and cooldown limits, stirred and inert reporting, validator and cycle report |
-| 3. Vertical slice | **Done, pending human playtest** | Two-room tutorial, the Cinder Marsh region (7 templates, 9 enemy types including 2 elites), the Crucible Warden (3 phases), run map, 23 upgrades, Codex, research tree, save and load, results → next-run loop. An automated browser playthrough completes tutorial → boss → results → Codex with zero console errors. |
-| 4. Full core progression | **Partly started** | Present: 9 cores gated by research, reaction mastery, shells and socket slot, levels. Missing: more regions, more bosses, the signature-ability slot. |
-| 5. Replayability and endgame | **Partly started** | Present: Daily Experiment (seeded, fixed core), Heat levels, Laboratory, procedural encounters. Missing: Boss Rush, Reaction Trials, Chaos Arena, Endless. |
-| 6. Polish and optimization | **Partly started** | Present: auto quality scaling, reduced motion, high contrast, left-handed HUD, haptics, procedural audio. Missing: device testing, Capacitor packaging. |
+| 1. Core physics prototype | **Done** | Slingshot launch with a floating anchor, cancel zone and multi-bounce preview. Brake, bullet-time aim, substepped collisions (no tunnelling at 5000 u/s, tested), materials, element-dependent physics, wall slams. |
+| 2. Elemental reaction foundation | **Done** | Data-driven engine: 31 reactions, context variants, zone reactions, bounded chains, stirred and inert reporting, validator. |
+| 3. Vertical slice | **Done, pending human playtest** | Tutorial, region, boss, map, upgrades, Codex, research, save and resume. The automated browser playthrough goes from a fresh save through the tutorial and the boss to results and the Codex with zero console errors. |
+| 4. Full core progression | **Done** | 9 cores with mastery levels and 2 unlockable aspects each. 3 regions and 3 data-driven bosses. 51 upgrades including 8 Evolutions. 46 feats, an unlock cascade, contracts and cosmetics. |
+| 5. Replayability and endgame | **Mostly done** | A 10-rung Heat ladder with records per core, the Abyssal Descent (endless), daily mutators, elite and Heat affixes, room challenges, Anomaly and Merchant rooms. Missing: Boss Rush and handcrafted Challenge runs. |
+| 6. Polish and optimization | **Largely done** | Trauma-based camera, weighted hit-stop, decals, a combo system, cached glows, adaptive per-region music, a sound redesign, an accessibility pack (shake and flash sliders, shape badges, assist mode), and save backup and restore. Missing: physical-device testing and Capacitor packaging. |
+
+## v0.4 at a glance
+
+- **Feel:**
+  - trauma² shake with rotation and a directional kick;
+  - zoom punches and a Peggle-style clear finale;
+  - hit-stop weighted by event, with a 150 ms/s budget;
+  - squash and stretch;
+  - merged pop-in damage numbers;
+  - gradient reaction titles with chain and target tags;
+  - floor decals;
+  - the shot combo, with tier names and pentatonic audio.
+- **Aiming:**
+  - a rubber-band anchor;
+  - a three-tier power ring;
+  - `predictShot()` traces walls and objects to the first enemy, then draws a ghost ball and a push arrow;
+  - the Reagent Lens now works.
+- **UI:**
+  - a new hub with contracts, modes and a level ring;
+  - region and aspect selection, and the Heat ladder;
+  - a node map with the route revealed;
+  - dealt rarity cards with foil, banish and pity;
+  - Merchant and Anomaly screens;
+  - animated results with goal-gradient bars;
+  - Feats, Wardrobe and boss trophy grid screens;
+  - an in-game confirm dialog;
+  - compact combat toasts;
+  - a boss intro card and wave/clear banners.
+- **Content:**
+  - the Frostvein Caverns and the Storm Spire;
+  - the Rime Matriarch and the Tempest Engine;
+  - Rime Hound, Mire Crawler, Storm Kite, Prism Mote, Rime Knight and Storm Conductor;
+  - affixes;
+  - 28 new upgrades;
+  - 18 aspects;
+  - 8 anomalies;
+  - 8 daily mutators.
+- **Persistence:**
+  - save v3 (migrated from v2);
+  - mid-run save and resume;
+  - `navigator.storage.persist()`;
+  - clipboard backup and restore.
 
 ## Balance snapshot
 
-From `npm run sim -- 10 0.6` (10 seeded runs per core). The bot aims with noise and **never dodges telegraphs**, so treat the win rate as a relative measure between cores, not the difficulty a human will feel.
+From `npm run sim -- 8 0.6` (8 seeded runs per core in the Cinder Marsh). The bot aims with noise and **never dodges telegraphs**, so treat the win rate as a relative measure between cores, not the difficulty a person will feel.
 
 | Core | Bot win | Reactions/min | Discoveries/run |
 | --- | --- | --- | --- |
-| Ember | 80% | 38 | 14 |
-| Tide | 80% | 44 | 17 |
-| Storm | 60% | 72 | 18 |
-| Frost | 50% | 27 | 20 |
-| Iron | 80% | 68 | 19 |
-| Venom | 90% | 48 | 16 |
-| Gale | 60% | 50 | 22 |
-| Stone | 40% | 37 | 18 |
-| Prism | 80% | 99 | 17 |
+| Ember | 100% | 40 | 16 |
+| Tide | 63% | 44 | 17 |
+| Storm | 88% | 73 | 17 |
+| Frost | 50% | 36 | 20 |
+| Iron | 100% | 63 | 18 |
+| Venom | 38% | 49 | 16 |
+| Gale | 75% | 49 | 21 |
+| Stone | 63% | 31 | 18 |
+| Prism | 88% | 116 | 17 |
 
-Most bot deaths come from the boss's Crucible Slam, which a person can dodge. The median room lasts about 15–20 s for the bot. People aim more slowly, so expect about 45–90 s per room and a 10–15 minute run. That needs confirming with playtests.
-
-Balance issues found and fixed through simulation:
-
-- Toxic Combustion and Miasma fed each other (40% of all reactions). Fixed with longer cooldowns, and by making combustion leave flames instead of poison.
-- Water on an ice sheet re-triggered Flash Freeze every tick. Water on poison zones kept re-spawning toxic pools. Fixed with zone-type conditions and the engine's self-respawn guard. Both have regression tests.
-- Mastery tier 1 unlocked on the first use of a reaction. It now needs 3 distinct feats.
+The new regions add enemy HP and damage per tier (+10% each) and a larger encounter budget. The soak tests run every region and boss across several cores, plus an endless descent past the first boss. They check stability (bounded reactions per step, finite state). They are not a measure of difficulty.
 
 ## Known limitations and technical debt
 
-1. **Mid-run state is not saved.** Closing the app mid-run loses the current run, but discoveries, mastery and banked Essence are safe. Next step: serialize `Run` (seed, floor, upgrades, HP, catalysts, RNG positions) at each map screen.
-2. **Only one region and one boss.** The region, template and boss data formats support more, but boss behaviour is code (`BossController`). A second boss should prompt a small behaviour-script format (attack patterns as data).
-3. **No human playtest yet.** Feel, difficulty and onboarding clarity have only been checked with the bot, the automated browser playthrough and screenshots.
-4. **Procedural art pass implemented:** engraved arenas, animated creature silhouettes, reagent props, luminous trails and elemental bursts, with a matching menu and HUD. Physical-device performance and human readability playtests are still needed.
-5. **Audio is synthesized placeholder.** The event → sound mapping and the adaptive intensity drone are in place for real assets to slot into.
-6. **Reagent Lens research is purchasable but has no in-game effect yet.** It is planned to show enemy weaknesses while aiming. Implement it or hide it before release.
-7. **Enemy-enemy collision is O(n²).** This is fine at the current counts (≤ 15). Add a spatial hash if Endless mode raises them.
-8. **Accessibility** covers reduced motion, high contrast, a left-handed HUD, sensitivity and haptics. A colour-blind palette and screen-reader labels for the Codex matrix are still to do.
+1. **No human playtest yet.** Feel, difficulty at high Heat, the region-tier scaling and onboarding clarity have only been checked with the bot, the automated browser playthrough and screenshots. This is the top priority.
+2. **Mid-run resume restarts the room in progress.** The run is saved at the map, so closing the app during a fight returns you to the map before that room, with the same room choices.
+3. **Venom and Frost cores trail the others** in bot win rate. A human dodges, so confirm this with playtests before buffing either.
+4. **Enemy-enemy collision is O(n²).** This is fine at the current counts (the encounter budget is capped at 26 threat). Add a spatial hash if endless depths raise it.
+5. **Accessibility:** shape-coded element badges exist, but there is no full colour-blind palette switch. The Codex matrix still has no screen-reader labels.
+6. **Paused frames differ by a few pixels** in headless Chrome (rasteriser noise). The visual review now tolerates up to 0.05% of pixels instead of requiring byte-identical frames. A frame that is still shaking shifts the whole arena, so the check still catches that.
 
 ## Next milestones (in order)
 
-1. **Human playtest round.** Five or more new players, using the structured questions from the brief (§19.3): control feel, reaction readability, first-discovery moment, build diversity, fairness. Instrument with the opt-in analytics export.
-2. **Mid-run save and resume.**
-3. **Reagent Lens**, plus the signature-ability slot (for example, a Steam Jet dash).
-4. **Region 2: Frostvein Caverns.** Ice sheets as the default floor, brittle crystal terrain, resonance and reflection walls. It adds a second boss and new elites that recombine existing rules.
-5. **Challenge modes:** Reaction Trials (handcrafted puzzle rooms solved with a named reaction), then Boss Rush and Chaos Arena.
-6. **Capacitor wrap** for iOS and Android, device performance pass, store builds.
-7. **Content expansion** into the inert pairs (fire+lightning → *Plasma*, water+wind → *Squall*, ice+metal → *Cold Weld*…). The validator's inert list is the backlog.
+1. **Human playtest round.** Five or more new players. Instrument with the opt-in analytics export.
+2. **Boss Rush and Challenge runs** (12 fixed-rule experiments that pay cosmetics).
+3. **Secret and three-element reactions** as an endgame discovery layer, plus a colour-blind palette.
+4. **Narrative drip**: journal entries triggered by weighted conditions.
+5. **Capacitor wrap** for iOS and Android, a device performance pass, and store builds.
+6. **Content expansion** into the inert pairs (fire+lightning → *Plasma*, water+wind → *Squall*, ice+metal → *Cold Weld*…). The validator's inert list is the backlog.

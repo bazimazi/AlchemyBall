@@ -130,3 +130,99 @@ The results screen shows:
 - the discoveries made, each with its follow-up tip;
 - your most-used reactions;
 - one concrete **next goal** computed from your profile, such as "3 Fragments to research Galvanics (Storm Core)".
+
+## v0.4 additions
+
+The reasoning and sources are in [RESEARCH.md](RESEARCH.md).
+
+### The shot combo
+
+- **What raises it:** every enemy hit, and every reaction while the ball keeps moving.
+- **What ends it:** the ball resting for 0.6 s, or the ball being hurt.
+- **Rewards:**
+  - Kills give +2% Essence per combo step, up to +40%.
+  - A combo of 3 or more pays `floor(n²/40)` Essence when it ends.
+- **Combo Engine:** this upgrade and the Tempo aspect add damage per step.
+
+### Regions
+
+| Region | Elements | Boss (phases) | Unlock |
+| --- | --- | --- | --- |
+| The Cinder Marsh | Fire · Water · Poison | The Crucible Warden (Metal → Fire → Lightning) | start |
+| The Frostvein Caverns | Ice · Water · Earth | The Rime Matriarch (Ice → Water → Wind). Uses ice novas, charges and wind flasks. | beat the Warden |
+| The Storm Spire | Lightning · Metal · Arcane | The Tempest Engine (Lightning → Metal → Arcane). Uses storm flasks, novas and charges. | beat the Matriarch |
+
+Each region tier adds +10% enemy HP and damage, and +1.5 to the encounter budget.
+
+Bosses are data (`BOSSES`), each made of phases, attacks and an arena. Every attack is telegraphed:
+
+- **Slam:** a ring with a countdown arc.
+- **Flask:** the landing circle is marked.
+- **Nova:** a charging ring, followed by radial bolts.
+- **Charge:** a lane marked with chevrons.
+
+### New enemies (each still teaches one idea)
+
+| Enemy | Teaches |
+| --- | --- |
+| Rime Hound (fast, carries ice) | Soak a cold foe with water and it freezes solid; then shatter it. |
+| Mire Crawler (earth, armored, grounded) | Earth grounds lightning. Heat turns it to magma, water to mud. |
+| Storm Kite (flying, charged shooter) | Lightning jumps to flyers through wet allies. |
+| Prism Mote (arcane shooter) | Arcane amplifies whatever you bring. |
+| Rime Knight (elite) | An armored knight goes down to freeze, then a hard hit. |
+| Storm Conductor (elite, adaptive) | Ground it, and keep varying your elements. |
+
+### Affixes
+
+- **Who gets them:**
+  - Elites from floor 5, from region tier 1, or in endless mode.
+  - One extra affix at Heat 4.
+  - Ordinary foes sometimes at Heat 7 and in endless mode.
+- **The affixes:**
+  - **Shielded:** a ward equal to 35% of HP.
+  - **Swift:** +40% speed.
+  - **Volatile:** a telegraphed blast 0.9 s after death.
+  - **Regenerating:** heals 3% per second after 2 s untouched.
+  - **Insulated:** immune to your core element.
+  - **Enraged:** +35% damage.
+
+### Heat ladder (cumulative)
+
+| Level | Rule |
+| --- | --- |
+| 1 | More enemies |
+| 2 | −10 max HP |
+| 3 | +15% enemy HP |
+| 4 | Elite affix |
+| 5 | +15% enemy speed |
+| 6 | Less healing |
+| 7 | Affixes on ordinary foes |
+| 8 | Bosses +25% HP and faster |
+| 9 | Pips recharge 15% slower |
+| 10 | +25% enemy damage |
+
+- **Rewards:** +15% Essence per level, and +⌊Heat/2⌋ Mastery Marks on a win.
+- **Records:** the best Heat is kept per core.
+
+### Run economy and rooms
+
+| Room | Contents |
+| --- | --- |
+| Merchant | Upgrades priced in Catalysts (common 2 / uncommon 3 / rare 5 / evolution 8). A remedy heals 30% HP for 2. |
+| Anomaly | 8 events with clear costs, e.g. "lose 15 HP, gain 8 Fragments and 2 Catalysts". |
+
+- **Room challenges** pay 2–3 Catalysts plus Essence.
+- **Pity:** a rare upgrade is guaranteed after 3 offers without one.
+- **Banish:** 2 per run, from research.
+- **Evolutions:** offered whenever every ingredient is held at max stacks. Reliquaries and elite rewards always include one if available.
+
+### Meta layers
+
+| Layer | Earned by | Gives |
+| --- | --- | --- |
+| Core mastery (Lv 1–10 per core) | Rooms, kills, discoveries, bosses, Heat | Aspects at Lv 3 and 6, +1 reroll at Lv 5, Essence, Fragments, a gilded skin at Lv 10 |
+| Feats (46) | Behaviours: bank shots, ×10 combos, 4-deep chains, untouched rooms, Heat wins, Codex milestones… | New upgrades in the run pool, cosmetics, currencies |
+| Contracts (3 slots) | Targeted goals | Essence or Fragments, claimed by hand. One free swap per day. No expiry. |
+| Cosmetics | Player levels, feats, core level 10 | Trails and skins. They never change stats. |
+| Abyssal Descent | Research (Marks + Essence) | Endless region loops: each loop adds +22% enemy HP and +12% damage. Best-depth record, and Marks per boss. |
+| Assist mode | Setting | 20% damage resistance, +2% per defeat, capped at 60%. |

@@ -1,5 +1,8 @@
 import { Content } from '../content';
+import type { Contract } from './profile';
 import type { SimEvent } from '../sim/events';
+import { contractEvent, contractMilestone } from './contracts';
+import { checkFeats, type FeatDef } from './feats';
 import { addXp, masteryTier, recordReaction, type Profile } from './profile';
 import type { Run } from './run';
 
@@ -8,10 +11,17 @@ export type Notice =
   | { kind: 'mastery'; reactionId: string; tier: number }
   | { kind: 'element'; element: string }
   | { kind: 'stirred'; pair: string }
-  | { kind: 'levelUp'; level: number; reward: string };
+  | { kind: 'levelUp'; level: number; reward: string }
+  | { kind: 'feat'; feat: FeatDef }
+  | { kind: 'contract'; contract: Contract };
 
 /** XP sources — tuned so discovery and variety level you faster than grinding kills. */
 export const XP = { kill: 1, room: 8, discovery: 20, masteryTier: 12, boss: 80, elite: 15 };
+
+/** Essence multiplier from the shot combo at the moment of a kill (+2% per step, max +40%). */
+export function comboEssenceMul(combo: number): number {
+  return 1 + Math.min(20, combo) * 0.02;
+}
 
 /**
  * Bridges simulation events into permanent progression. Everything recorded here is committed
@@ -19,11 +29,13 @@ export const XP = { kill: 1, room: 8, discovery: 20, masteryTier: 12, boss: 80, 
  */
 export class ProgressionTracker {
   private dirty = false;
+  private featsDirty = false;
 
   constructor(private profile: Profile, private run: Run | null, private notify: (n: Notice) => void, private sandbox = false) {}
 
   handle(e: SimEvent): void {
     const p = this.profile;
+    const live = !this.sandbox;
     switch (e.type) {
       case 'reaction': {
         const feats: string[] = [e.holderKind];
@@ -34,6 +46,7 @@ export class ProgressionTracker {
         if (e.onBoss) feats.push('boss');
         const res = recordReaction(p, e.reactionId, this.sandbox ? feats.filter((f) => f !== 'boss') : feats);
         p.stats.reactions++;
+        p.stats.maxChain = Math.max(p.stats.maxChain, e.depth);
         if (this.run) {
           this.run.stats.reactions++;
           this.run.stats.reactionCounts[e.reactionId] = (this.run.stats.reactionCounts[e.reactionId] ?? 0) + 1;
@@ -50,6 +63,7 @@ export class ProgressionTracker {
           }
           this.xp(XP.discovery);
           this.notify({ kind: 'discovery', reactionId: e.reactionId, reward });
+          for (const c of contractMilestone(p, 'discover')) this.notify({ kind: 'contract', contract: c });
         }
         if (res.tierUp) {
           p.fragments += 3;
@@ -57,7 +71,8 @@ export class ProgressionTracker {
           this.xp(XP.masteryTier);
           this.notify({ kind: 'mastery', reactionId: e.reactionId, tier: res.tierUp });
         }
-        this.dirty = true;
+        if (live) this.contracts(e);
+        this.dirty = this.featsDirty = true;
         break;
       }
       case 'stirred':
@@ -81,15 +96,50 @@ export class ProgressionTracker {
           this.dirty = true;
         }
         break;
+      case 'hit':
+        if (live && (e.bounces ?? 0) > p.stats.maxBounceHit) {
+          p.stats.maxBounceHit = e.bounces ?? 0;
+          this.featsDirty = true;
+        }
+        break;
+      case 'combo':
+        if (live) {
+          if (e.count > p.stats.maxCombo) {
+            p.stats.maxCombo = e.count;
+            this.featsDirty = true;
+          }
+          if (this.run) this.run.stats.maxCombo = Math.max(this.run.stats.maxCombo, e.count);
+          this.contracts(e);
+        }
+        break;
+      case 'comboEnd':
+        if (live && this.run && e.essence > 0) this.run.stats.essence += Math.round(e.essence * (1 + (this.run.mods().essenceMul ?? 0)));
+        break;
+      case 'ballDamaged':
+        if (this.run) this.run.stats.damageTaken += e.amount;
+        break;
       case 'kill': {
         const b = (p.bestiary[e.enemyId] ??= { seen: 0, kills: 0 });
         b.kills++;
-        if (this.run && !this.sandbox) {
-          const essence = Math.round(e.essence * (1 + this.run.cfg.heat * 0.15));
+        if (this.run && live) {
+          const mods = this.run.mods();
+          const essence = Math.round(e.essence * (1 + this.run.cfg.heat * 0.15) * (1 + (mods.essenceMul ?? 0)) * comboEssenceMul(e.combo ?? 0));
           this.run.stats.essence += essence;
           this.run.stats.kills++;
+          p.stats.kills++;
           this.xp(XP.kill);
-          if (e.isBoss) this.run.stats.bossDefeated = true;
+          if (e.elite) {
+            p.stats.elites++;
+            this.run.stats.elitesKilled++;
+            this.xp(XP.elite);
+          }
+          if (e.isBoss) {
+            this.run.stats.bossDefeated = true;
+            this.run.stats.bossesDefeated.push(e.enemyId);
+            p.stats.bossKills[e.enemyId] = (p.stats.bossKills[e.enemyId] ?? 0) + 1;
+          }
+          this.contracts(e);
+          this.featsDirty = true;
         }
         this.dirty = true;
         break;
@@ -97,9 +147,26 @@ export class ProgressionTracker {
     }
   }
 
+  private contracts(e: SimEvent): void {
+    for (const c of contractEvent(this.profile, e)) this.notify({ kind: 'contract', contract: c });
+  }
+
+  /** Game-level milestone (room challenge done, clean room, floor reached). */
+  milestone(kind: 'challenge' | 'noHit' | 'floor', value = 1, core?: string): void {
+    for (const c of contractMilestone(this.profile, kind, value, core)) this.notify({ kind: 'contract', contract: c });
+    this.featsDirty = this.dirty = true;
+  }
+
+  /** Called once per frame by the session: unlock any feats whose conditions became true. */
+  flushFeats(): void {
+    if (!this.featsDirty) return;
+    this.featsDirty = false;
+    for (const f of checkFeats(this.profile)) this.notify({ kind: 'feat', feat: f });
+  }
+
   noteEnemiesSeen(ids: string[]): void {
     for (const id of ids) (this.profile.bestiary[id] ??= { seen: 0, kills: 0 }).seen++;
-    this.dirty = true;
+    this.dirty = this.featsDirty = true;
   }
 
   xp(n: number): void {

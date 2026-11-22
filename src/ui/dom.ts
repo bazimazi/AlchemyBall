@@ -25,11 +25,56 @@ export function clear(el: HTMLElement): void {
 }
 
 /** Stacked, non-interactive notifications. At most 3 are visible; older ones are dropped. */
-export function toast(root: HTMLElement, text: string, color?: string, ms = 2800): void {
+export function toast(root: HTMLElement, text: string, color?: string, ms = 2800, icon?: string, variant?: 'feat'): void {
   let stack = root.querySelector<HTMLElement>('.toasts');
-  if (!stack) root.append((stack = h('div', { class: 'toasts' })));
-  const t = h('div', { class: 'toast', style: `${color ? `border-color:${color};` : ''}animation-duration:${ms}ms` }, text);
+  if (!stack) root.append((stack = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' })));
+  const t = h('div', { class: `toast${variant ? ' toast-' + variant : ''}`, style: `${color ? `--c:${color};` : ''}animation-duration:${ms}ms` },
+    icon ? h('span', { class: 'toast-ic' }, icon) : null, h('span', null, text));
   stack.append(t);
   while (stack.children.length > 3) stack.firstElementChild!.remove();
   setTimeout(() => t.remove(), ms);
+}
+
+/** In-game confirmation dialog (replaces window.confirm, which breaks immersion and focus on mobile). */
+export function confirmDialog(root: HTMLElement, title: string, text: string, ok = 'Confirm', danger = false): Promise<boolean> {
+  return new Promise((resolve) => {
+    const close = (v: boolean) => {
+      el.classList.add('out');
+      setTimeout(() => el.remove(), 180);
+      resolve(v);
+    };
+    const el = h('div', { class: 'screen overlay modal-wrap', role: 'dialog', 'aria-modal': 'true' },
+      h('div', { class: 'modal' },
+        h('h2', null, title),
+        h('p', { class: 'small dim' }, text),
+        h('div', { class: 'row' },
+          h('button', { class: 'ghost', onclick: () => close(false) }, 'Cancel'),
+          h('div', { class: 'spacer' }),
+          h('button', { class: danger ? 'danger' : 'primary', onclick: () => close(true) }, ok))));
+    root.append(el);
+  });
+}
+
+/** Animate a number counting up (Balatro-style payoff). Calls `onStep` for audio ticks. */
+export function countUp(el: HTMLElement, to: number, ms = 700, prefix = '', onStep?: (i: number) => void): void {
+  const start = performance.now();
+  let lastStep = -1;
+  const reduced = document.body.classList.contains('rm');
+  if (reduced || to <= 0) {
+    el.textContent = prefix + to;
+    return;
+  }
+  const tick = (now: number) => {
+    const k = Math.min(1, (now - start) / ms);
+    const eased = 1 - Math.pow(1 - k, 3);
+    const v = Math.round(to * eased);
+    el.textContent = prefix + v;
+    const step = Math.floor(k * 8);
+    if (step !== lastStep && step < 8) {
+      lastStep = step;
+      onStep?.(step);
+    }
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }

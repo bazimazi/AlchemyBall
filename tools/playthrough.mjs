@@ -19,6 +19,7 @@ await page.reload();
 await page.waitForTimeout(400);
 const shots = new Set();
 const shot = async (name) => { if (shots.has(name)) return; shots.add(name); await page.screenshot({ path: `${out}/${String(shots.size).padStart(2, '0')}-${name}.png` }); };
+const document_has_anomaly = (st) => /Flask|Codex|Mirror|Laboratory|Ghost|Circle|Cache|Fountain/.test(st.txt) && !st.txt.includes('Research Cache') && !st.txt.includes('Alchemy Codex');
 const t0 = Date.now();
 let lastGameShot = 0;
 while ((Date.now() - t0) / 1000 < seconds) {
@@ -38,8 +39,9 @@ while ((Date.now() - t0) / 1000 < seconds) {
       }
     }
     const h2 = document.querySelector('.screen h2, .screen h1:not(.x)')?.textContent ?? ''; const heads = [...document.querySelectorAll('.screen h1, .screen h2')].map((x) => x.textContent).join('|');
-    return { txt: heads, inGame: !!w, aim, discovery: !!document.querySelector('.discovery'), boss: !!w?.boss, room: a.session?.room };
+    return { txt: heads, inGame: !!w, aim, discovery: !!document.querySelector('.discovery'), boss: !!w?.boss, room: a.session?.room, map: !!document.querySelector('.map-node:not([disabled])'), intro: !!document.querySelector('.boss-intro'), modal: !!document.querySelector('.modal') };
   });
+  if (st.intro) { await shot('boss-intro'); await page.locator('.boss-intro').click().catch(() => {}); continue; }
   if (st.discovery) { await shot('discovery'); await page.locator('.discovery button').first().click(); continue; }
   if (st.inGame) {
     if (Date.now() - lastGameShot > 8000) { lastGameShot = Date.now(); await shot(`game-${st.room}${st.boss ? '-boss' : ''}-${Math.floor((Date.now() - t0) / 8000)}`); }
@@ -52,13 +54,15 @@ while ((Date.now() - t0) / 1000 < seconds) {
     continue;
   }
   const click = async (sel, name) => { const l = page.locator(sel).first(); if (await l.count()) { await shot(name); await l.click(); return true; } return false; };
-  if (st.txt.includes('Choose an upgrade') || st.txt.includes('Reliquary')) { await click('.offer', 'upgrade'); continue; }
+  if (st.txt.includes('Choose an upgrade') || st.txt.includes('Reliquary') || st.txt.includes('Elite spoils')) { await click('.offer', 'upgrade'); await page.waitForTimeout(400); continue; }
+  if (st.txt.includes('Wandering Merchant')) { await shot('merchant'); await page.locator('button.primary').last().click(); continue; }
+  if (document_has_anomaly(st)) { await click('.anomaly .choice, .anomaly button.primary', 'anomaly'); await page.waitForTimeout(300); continue; }
   if (st.txt.includes('Still Spring')) { await click('.card.selectable', 'rest'); continue; }
   if (st.txt.includes('Research Cache')) { await shot('research-cache'); await page.locator('button.primary').first().click(); continue; }
-  if (st.txt.includes('Choose your path') || st.txt.includes('The marsh awaits')) { await click('.room-card', 'map'); continue; }
+  if (st.map) { await click('.map-node:not([disabled])', 'map'); continue; }
   if (st.txt.includes('Victory') || st.txt.includes('The ball shattered')) { await shot('results'); await page.getByText('Codex').last().click(); await page.waitForTimeout(300); await shot('codex'); await page.locator('.cell.known').first().click().catch(() => {}); await page.waitForTimeout(200); await shot('codex-detail'); break; }
-  if (st.txt.includes('Prepare your ball')) { await shot('prep'); await page.locator('button.primary').last().click(); continue; }
-  if (st.txt.includes('Alchemy Ball')) { await page.locator('button.primary').first().click(); continue; }
+  if (st.txt.includes('Prepare your expedition')) { await shot('prep'); await page.locator('button.primary').last().click(); continue; }
+  if (st.txt.includes('Alchemy Ball')) { await shot('hub'); await page.locator('button.cta').first().click(); continue; }
   await page.waitForTimeout(200);
 }
 const summary = await page.evaluate(() => { const p = window.alchemy.profile; return { discovered: Object.keys(p.discovered), essence: p.essence, fragments: p.fragments, runs: p.stats.runs, level: p.level, floor: window.alchemy.run?.floor }; });

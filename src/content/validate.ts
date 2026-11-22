@@ -156,7 +156,34 @@ export function validateContent(): ValidationIssue[] {
       for (const o of t.objects) if (!Content.objects.has(o.id)) err(`template:${t.id}`, `unknown object '${o.id}'`);
       for (const z of t.zones) if (!Content.zones.has(z.id)) err(`template:${t.id}`, `unknown zone '${z.id}'`);
     }
+    if (!Content.bosses[reg.boss]) err(`region:${reg.id}`, `unknown boss '${reg.boss}'`);
+    if (reg.requiresBoss && !Content.bosses[reg.requiresBoss]) err(`region:${reg.id}`, `unknown unlock boss '${reg.requiresBoss}'`);
+    if (reg.templates.length < 2) err(`region:${reg.id}`, 'needs at least 2 templates (no immediate repeats)');
+    if (!reg.enemyPool.some((p) => p.minFloor === 0)) err(`region:${reg.id}`, 'no enemy available on floor 1');
   }
+  // Bosses: body, phases ordered by HP threshold, summons and arena content exist.
+  for (const b of Object.values(Content.bosses)) {
+    const where = `boss:${b.id}`;
+    if (!Content.enemies.has(b.id)) err(where, 'boss has no enemy body with the same id');
+    b.phases.forEach((ph, i) => {
+      if (!hasEl(ph.element)) err(where, `phase ${i + 1}: unknown element '${ph.element}'`);
+      if (!Content.enemies.has(ph.summon)) err(where, `phase ${i + 1}: unknown summon '${ph.summon}'`);
+      if (ph.flaskZone && !Content.zones.has(ph.flaskZone)) err(where, `phase ${i + 1}: unknown flask zone '${ph.flaskZone}'`);
+      if (ph.nova?.element && !hasEl(ph.nova.element)) err(where, `phase ${i + 1}: unknown nova element`);
+      if (i > 0 && ph.hpAbove >= b.phases[i - 1].hpAbove) err(where, 'phase thresholds must decrease');
+    });
+    for (const o of b.arena.objects) if (!Content.objects.has(o.id)) err(where, `arena: unknown object '${o.id}'`);
+    for (const z of b.arena.zones) if (!Content.zones.has(z.id)) err(where, `arena: unknown zone '${z.id}'`);
+  }
+  // Upgrades: unlock ids are research nodes or feats; evolutions name real ingredients.
+  for (const u of lists.UPGRADES) {
+    if (u.unlock && !hasRes(u.unlock) && !u.unlock.startsWith('feat_')) err(`upgrade:${u.id}`, `unknown unlock '${u.unlock}'`);
+    for (const r of u.requires ?? []) if (!Content.upgrades.has(r)) err(`upgrade:${u.id}`, `evolution needs unknown '${r}'`);
+    if (u.requires && u.rarity !== 'legendary') err(`upgrade:${u.id}`, 'evolutions must be legendary');
+  }
+  for (const a of lists.ASPECTS) if (!Content.cores.has(a.core)) err(`aspect:${a.id}`, `unknown core '${a.core}'`);
+  for (const c of lists.CORES) if (!lists.ASPECTS.some((a) => a.core === c.id && a.level === 0)) warn(`core:${c.id}`, 'no default aspect');
+  for (const l of Content.masteryLevels) if (l.grant?.cosmetic && !Content.cosmetics.has(l.grant.cosmetic)) err(`level:${l.level}`, `unknown cosmetic '${l.grant.cosmetic}'`);
 
   // Loop analysis: element A reacting produces B (output/chain/zone) that can react with something to produce A again.
   for (const cycle of findReactionCycles()) warn('graph', `cycle ${cycle.join(' → ')} (bounded at runtime by cooldowns and chain depth)`);

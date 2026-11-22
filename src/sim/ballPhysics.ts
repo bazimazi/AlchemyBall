@@ -59,6 +59,10 @@ export function effectivePhysics(ball: Ball, shell: ShellDef | undefined, mods: 
   out.launchMul *= 1 + (mods.launchPower ?? 0);
   out.maxSpeedMul *= 1 + (mods.maxSpeed ?? 0);
   out.dragMul *= Math.max(0.2, 1 + (mods.drag ?? 0));
+  if (mods.windSpeed && (ball.auras.get('wind') ?? 0) > 0.2) {
+    out.maxSpeedMul *= 1 + mods.windSpeed;
+    out.dragMul *= 1 - 0.75 * mods.windSpeed;
+  }
   out.restitutionAdd += mods.restitution ?? 0;
   return out;
 }

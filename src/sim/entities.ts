@@ -35,6 +35,13 @@ export interface Ball extends Holder {
   brakeCd: number;
   /** Seconds since last launch; used for trail/feedback. */
   sinceLaunch: number;
+  /** Wall bounces since the last launch (Ricochet). */
+  bounces: number;
+  /** Current shot combo and how long the ball has been resting. */
+  combo: number;
+  restTimer: number;
+  /** Wake timer (Elemental Wake trail). */
+  trailTimer: number;
 }
 
 export interface Enemy extends Holder {
@@ -56,6 +63,17 @@ export interface Enemy extends Holder {
   /** Last damage source for kill attribution. */
   lastHitBy?: string;
   spawnFx: number;
+  /** Elite/Heat affixes. */
+  affixes: string[];
+  /** Shielded affix: damage absorbed before HP. */
+  ward: number;
+  maxWard: number;
+  /** World time of the last damage taken (Regenerating). */
+  lastHurt: number;
+  /** Multiplier on this enemy's damage to the ball. */
+  dmgMul: number;
+  /** Multiplier on movement speed (Swift, Heat). */
+  speedMul: number;
 }
 
 export interface Zone extends Holder {
@@ -107,6 +125,14 @@ export interface Telegraph {
   dur: number;
   damage: number;
   color: string;
+  /** Death cause shown if this attack kills the ball. */
+  cause: string;
+  kind: 'circle' | 'line' | 'nova';
+  /** Line telegraphs (boss charge): direction and length. */
+  dir?: { x: number; y: number };
+  length?: number;
+  /** Custom resolution (boss novas/charges, volatile explosions). Replaces the default slam. */
+  fire?: () => void;
 }
 
 export type AnyHolder = Ball | Enemy | Zone | ArenaObject;

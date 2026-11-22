@@ -202,7 +202,7 @@ export interface ShellDef {
   unlock?: string;
 }
 
-export type UpgradeRarity = 'common' | 'uncommon' | 'rare';
+export type UpgradeRarity = 'common' | 'uncommon' | 'rare' | 'legendary';
 
 export interface UpgradeDef {
   id: string;
@@ -216,7 +216,70 @@ export interface UpgradeDef {
   maxStacks: number;
   /** Stable key-value modifiers read by the simulation. Keys are documented in sim/modifiers.ts. */
   mods: Record<string, number>;
+  /** Research node or feat id that must be unlocked before this upgrade can be offered. */
   unlock?: string;
+  /** Evolutions: upgrade ids that must all be held (at max stacks) before this can be offered. */
+  requires?: string[];
+  /** Short glyph shown on the card art. */
+  icon?: string;
+}
+
+/** Per-core alternative passives (Hades-style aspects), unlocked by core mastery level. */
+export interface AspectDef {
+  id: string;
+  core: string;
+  name: string;
+  description: string;
+  /** Core level required. 0 = always available (the default aspect). */
+  level: number;
+  mods: Record<string, number>;
+}
+
+/** Elite / Heat affixes that change how an enemy must be fought. */
+export interface AffixDef {
+  id: 'shielded' | 'swift' | 'volatile' | 'regenerating' | 'insulated' | 'enraged';
+  name: string;
+  description: string;
+  color: string;
+  glyph: string;
+}
+
+/** One rung of the cumulative Heat ladder. */
+export interface HeatLevelDef {
+  level: number;
+  name: string;
+  description: string;
+}
+
+export interface BossPhaseDef {
+  hpAbove: number;
+  armor: number;
+  element: ElementId;
+  slamInterval: number;
+  summon: string;
+  summonInterval: number;
+  flaskInterval: number;
+  /** Zone left by lobbed flasks (hostile). */
+  flaskZone?: ZoneId;
+  /** Radial projectile burst, telegraphed by a charging ring. */
+  nova?: { interval: number; count: number; speed: number; damage: number; element?: ElementId };
+  /** Telegraphed dash toward the ball. */
+  chargeInterval?: number;
+}
+
+export interface BossDef {
+  id: string;
+  name: string;
+  title: string;
+  hp: number;
+  radius: number;
+  mass: number;
+  phases: BossPhaseDef[];
+  essence: number;
+  marks: number;
+  lesson: string;
+  /** Arena layout in normalized coordinates. */
+  arena: { objects: { id: string; x: number; y: number }[]; zones: { id: ZoneId; x: number; y: number; r: number }[] };
 }
 
 export interface ResearchNode {
@@ -224,6 +287,8 @@ export interface ResearchNode {
   name: string;
   description: string;
   branch: 'elements' | 'ball' | 'lab' | 'world';
+  /** Optional extra visibility gate (e.g. a feat id) besides `requires`. */
+  hiddenUntil?: string;
   cost: { fragments?: number; essence?: number; marks?: number };
   requires: string[];
   /** What the node grants, for UI. */
@@ -247,5 +312,11 @@ export interface RegionDef {
   templates: RoomTemplate[];
   boss: string;
   floors: number;
-  palette: { bg: string; floor: string; wall: string; accent: string };
+  /** Difficulty tier: adds encounter budget and enemy HP. */
+  tier: number;
+  /** Boss id that must be defeated (any core) before this region can be entered. */
+  requiresBoss?: string;
+  /** Short element hint shown on the map ("Fire & water"). */
+  flavor: string;
+  palette: { bg: string; floor: string; wall: string; accent: string; light: string; motes: string[] };
 }

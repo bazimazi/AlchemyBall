@@ -175,8 +175,15 @@ export function renderCodex(root: HTMLElement, p: Profile, onBack: () => void): 
       h('div', { class: 'card small' }, nl ? `Next level at ${nl.xp} XP (you have ${p.xp}): ${nl.reward}` : 'You have reached the highest mastery level.'),
       h('div', { class: 'card' }, h('h3', null, 'Collection milestones'),
         ...[5, 10, 20, total].map((n) => h('div', { class: `feat ${known >= n ? 'got' : 'not'}` }, `${known >= n ? '✓' : '○'} Discover ${n === total ? 'every' : n} reaction${n > 1 ? 's' : ''}`)),
-        ...Content.lists.CORES.map((c) => h('div', { class: `feat ${p.trophies.includes(`boss:warden:${c.id}`) ? 'got' : 'not'}` }, `${p.trophies.includes(`boss:warden:${c.id}`) ? '✓' : '○'} Defeat the Crucible Warden with the ${c.name}`)),
       ),
+      h('div', { class: 'card' }, h('h3', null, 'Boss trophies'),
+        h('div', { class: 'tiny dim' }, 'One seal for each core that has defeated each guardian.'),
+        h('div', { class: 'trophy-grid', style: `grid-template-columns: 90px repeat(${Content.lists.CORES.length}, 1fr)` },
+          h('span'), ...Content.lists.CORES.map((c) => h('span', { class: 'tiny', title: c.name, style: `color:${Content.elements.get(c.element)?.color}` }, Content.elements.get(c.element)?.glyph ?? '')),
+          ...Object.values(Content.bosses).flatMap((b) => [
+            h('span', { class: 'tiny' }, b.name.replace(/^The /, '')),
+            ...Content.lists.CORES.map((c) => h('span', { class: p.trophies.includes(`boss:${b.id}:${c.id}`) ? 'seal got' : 'seal' }, p.trophies.includes(`boss:${b.id}:${c.id}`) ? '♛' : '·')),
+          ]))),
     );
   };
 
