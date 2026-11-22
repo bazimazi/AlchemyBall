@@ -48,7 +48,7 @@ interface RegionSound {
   comboRoot: number;
   pad: OscillatorType;
   padVol: number;
-  lead: OscillatorType | 'bell';
+  lead: 'wood' | 'glass' | 'wire';
   bass: OscillatorType;
   /** Base low-pass cutoff (Hz) — timbre brightness. */
   bright: number;
@@ -56,15 +56,21 @@ interface RegionSound {
 
 const REGION_SOUND: Record<string, RegionSound> = {
   // Warm, earthy: D dorian (i – IV – i – VII), soft triangles.
-  cinder_marsh: { root: 50, scale: DORIAN, bpm: 96, prog: [0, 3, 0, 6], comboRoot: 72, pad: 'triangle', padVol: 1, lead: 'triangle', bass: 'triangle', bright: 1100 },
+  cinder_marsh: { root: 50, scale: DORIAN, bpm: 96, prog: [0, 3, 0, 6], comboRoot: 72, pad: 'triangle', padVol: 1, lead: 'wood', bass: 'triangle', bright: 1100 },
   // Glassy, bell-like: E aeolian (i – VI – III – VII), FM bells.
-  frostvein: { root: 52, scale: AEOLIAN, bpm: 88, prog: [0, 5, 2, 6], comboRoot: 67, pad: 'sine', padVol: 1.1, lead: 'bell', bass: 'sine', bright: 2600 },
+  frostvein: { root: 52, scale: AEOLIAN, bpm: 88, prog: [0, 5, 2, 6], comboRoot: 67, pad: 'sine', padVol: 1.1, lead: 'glass', bass: 'sine', bright: 2600 },
   // Driving, saw-ish: A phrygian (i – bII – i – bVII).
-  storm_spire: { root: 45, scale: PHRYGIAN, bpm: 112, prog: [0, 1, 0, 6], comboRoot: 65, pad: 'sawtooth', padVol: 0.6, lead: 'sawtooth', bass: 'sawtooth', bright: 1500 },
+  storm_spire: { root: 45, scale: PHRYGIAN, bpm: 112, prog: [0, 1, 0, 6], comboRoot: 65, pad: 'sawtooth', padVol: 0.6, lead: 'wire', bass: 'sawtooth', bright: 1500 },
 };
 const DEFAULT_REGION = 'cinder_marsh';
 const BOSS_PROG = [0, 0, 5, 1];
 const TEMPO: Record<MusicScene, number> = { menu: 0.75, map: 0.85, combat: 1, boss: 1.15, results: 0.7, none: 1 };
+// One phrase per measure, with rests left open for the lead's delay.
+const CALM_PHRASES: Partial<Record<MusicScene, readonly (readonly number[])[]>> = {
+  menu: [[0, -1, -1, 2, -1, 4, -1, 3], [1, -1, 2, -1, 0, -1, -1, -1]],
+  map: [[0, -1, 2, 3, -1, 4, 3, -1], [1, -1, 2, -1, 4, 2, -1, -1]],
+  results: [[4, -1, 3, -1, 2, -1, -1, 1], [2, -1, 1, -1, 0, -1, -1, -1]],
+};
 
 const hz = (midi: number): number => 440 * Math.pow(2, (midi - 69) / 12);
 const st = (f: number, semis: number): number => f * Math.pow(2, semis / 12);
@@ -90,6 +96,7 @@ interface SceneVoice {
   out: GainNode;
   pad: BiquadFilterNode;
   lead: BiquadFilterNode;
+  send: GainNode;
   step: number;
   next: number;
   stepDur: number;
@@ -144,6 +151,11 @@ export class Audio {
     this.master = ctx.createGain();
     this.master.gain.value = 0.9;
     const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -13;
+    comp.knee.value = 16;
+    comp.ratio.value = 3.5;
+    comp.attack.value = 0.007;
+    comp.release.value = 0.16;
     this.master.connect(comp).connect(ctx.destination);
 
     this.sfx = ctx.createGain();
@@ -222,11 +234,13 @@ export class Audio {
     const old = this.cur;
     this.cur = undefined;
     if (old) {
-      const g = old.out.gain;
-      g.cancelScheduledValues(t);
-      g.setValueAtTime(g.value, t);
-      g.linearRampToValueAtTime(0, t + XFADE);
-      setTimeout(() => { old.out.disconnect(); old.pad.disconnect(); old.lead.disconnect(); }, (XFADE + 0.8) * 1000);
+      for (const node of [old.out, old.send]) {
+        const g = node.gain;
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(g.value, t);
+        g.linearRampToValueAtTime(0, t + XFADE);
+      }
+      setTimeout(() => { old.out.disconnect(); old.pad.disconnect(); old.lead.disconnect(); old.send.disconnect(); }, (XFADE + 0.8) * 1000);
     }
     if (this.sceneName === 'none') return;
 
@@ -244,11 +258,14 @@ export class Audio {
     lead.type = 'lowpass';
     lead.frequency.value = R.bright * 1.6;
     lead.connect(out);
-    if (this.musicEcho) lead.connect(this.musicEcho.input);
+    const send = ctx.createGain();
+    send.gain.setValueAtTime(0, t);
+    send.gain.linearRampToValueAtTime(R.lead === 'glass' ? 0.9 : 0.62, t + (old ? XFADE : 0.8));
+    if (this.musicEcho) lead.connect(send).connect(this.musicEcho.input);
 
     const stepDur = 60 / (R.bpm * TEMPO[this.sceneName]) / 4;
     this.musicEcho?.delay.delayTime.setTargetAtTime(Math.min(0.9, stepDur * 3), t, 0.1); // dotted 8th
-    this.cur = { scene: this.sceneName, R, out, pad, lead, step: 0, next: t + 0.08, stepDur };
+    this.cur = { scene: this.sceneName, R, out, pad, lead, send, step: 0, next: t + 0.08, stepDur };
   }
 
   private sceneIntensity(scene: MusicScene): number {
@@ -292,7 +309,7 @@ export class Audio {
         for (const det of [-7, 7]) this.sustain(s.pad, t, f, dur, padVol, boss ? 'sawtooth' : R.pad, calm ? 0.9 : 0.3, 0.6, det);
       }
       if (calm || boss) this.sustain(s.out, t, hz(bassMidi(deg)), dur, calm ? 0.16 : 0.12, 'sine', 0.8, 0.6);
-      if (R.lead === 'bell' && calm) this.fm(s.lead, t + stepDur * 2, hz(R.root + 24 + degSemi(R, deg + 4)), 3.5, 0.8, 2.2, 0.035);
+      if (calm) this.sustain(s.pad, t + stepDur * 2, hz(R.root + 24 + degSemi(R, deg + 4)), dur * 0.8, 0.024, 'sine', 1.4, 1);
     }
 
     // Bass pulse.
@@ -308,22 +325,21 @@ export class Audio {
       this.note(s.out, t, hz(bassMidi(deg)), stepDur * 6, 0.12, 'sine', 0.02);
     }
 
-    // Arpeggio over chord tones (two octaves).
-    const tones = [0, 2, 4, 7, 9, 11].map((k) => R.root + 12 + degSemi(R, deg + k));
-    let arpRate = 2;
-    let arpProb = 1;
-    let arpVol = 0.07;
-    let pattern = [0, 1, 2, 3, 4, 3, 2, 1];
-    if (scene === 'menu') { arpProb = 0.35; arpVol = 0.06; pattern = [0, 2, 1, 3, 2, 4, 3, 1]; }
-    else if (scene === 'map') { arpProb = 0.5; arpRate = 4; arpVol = 0.065; pattern = [0, 2, 4, 3, 1, 2]; }
-    else if (scene === 'results') { arpProb = 0.7; arpRate = 4; arpVol = 0.06; pattern = [5, 4, 2, 3, 1, 0]; }
-    else if (scene === 'combat') { arpRate = I > 0.55 ? 1 : 2; arpVol = 0.045 + I * 0.04; }
-    else if (boss) { arpRate = 1; arpVol = 0.06; pattern = [0, 1, 2, 0, 1, 3, 2, 1]; }
-    if (pos % arpRate === 0 && Math.random() < arpProb) {
-      const m = tones[pattern[Math.floor(step / arpRate) % pattern.length]];
-      const vol = arpVol * (pos % 2 === 1 ? 0.6 : 1);
-      if (R.lead === 'bell') this.fm(s.lead, t, hz(m) * vary(0.002), 3.5, calm ? 1 : 1.4, stepDur * arpRate * 2.5, vol * 1.1);
-      else this.note(s.lead, t, hz(m) * vary(0.002), stepDur * arpRate * (calm ? 2.2 : 1.4), vol, R.lead, 0.005);
+    const phrases = CALM_PHRASES[scene];
+    const pulse = boss || I > 0.62 ? 1 : 2;
+    const pattern = phrases?.[bar % phrases.length] ?? (boss ? [0, 1, 2, 0, 1, 4, 2, 1] : [0, 1, 2, 3, 4, 2, 3, 1]);
+    const tone = pattern[Math.floor(pos / pulse) % pattern.length];
+    if (pos % pulse === 0 && tone >= 0) {
+      const noteDegree = [0, 2, 4, 7, 9][tone];
+      const f = hz(R.root + (boss ? 0 : 12) + degSemi(R, deg + noteDegree)) * vary(0.002);
+      const vol = (calm ? 0.085 : 0.045 + I * 0.04) * (pos % 2 === 1 ? 0.56 : 1);
+      const length = stepDur * pulse * (calm ? 2.7 : 1.7);
+      if (R.lead === 'glass') this.glass(s.lead, t, f, vol, length * 1.35);
+      else if (R.lead === 'wire') this.fm(s.lead, t, f, 1.5, 0.55, length, vol);
+      else {
+        this.osc(s.lead, t, f, length, vol, { type: 'triangle', attack: 0.008 });
+        this.osc(s.lead, t, f * 3.02, length * 0.34, vol * 0.28);
+      }
     }
 
     // Percussion (noise-based hats/snare, sine kick), fading in with intensity.
@@ -531,6 +547,13 @@ export class Audio {
     for (const [ratio, amp, dl] of parts) this.osc(d, t, f * ratio * vary(0.01), len * dl, v * amp, { attack: 0.002 });
   }
 
+  /** Glass keeps a rounded fundamental and loses its bright overtones quickly after the strike. */
+  private glass(d: AudioNode, t: number, f: number, v: number, len: number): void {
+    this.osc(d, t, f, len, v, { attack: 0.003 });
+    this.osc(d, t, f * 2.63, len * 0.53, v * 0.38, { attack: 0.002 });
+    this.osc(d, t, f * 4.21, len * 0.26, v * 0.18, { attack: 0.002 });
+  }
+
   /** Element-flavoured tail for reactions and element-tinted sounds. */
   private tail(el: string, d: AudioNode, t: number, f: number, v: number): void {
     switch (el) {
@@ -721,18 +744,16 @@ export class Audio {
   select(): void {
     const t = this.t();
     if (t === undefined || !this.gate('ui', 0.03, 0.06)) return;
-    this.osc(this.sfx!, t, 990 * vary(), 0.06, 0.08, { type: 'triangle' });
-    this.osc(this.sfx!, t, 1485 * vary(), 0.04, 0.03);
-    this.noise(this.sfx!, t, 0.008, 0.04, 5000, { type: 'highpass' });
+    this.glass(this.sfx!, t, 620 * vary(), 0.09, 0.11);
+    this.transient(this.sfx!, t, 0.035, 3300, 0.012);
   }
 
   confirm(): void {
     const t = this.t();
     if (t === undefined || !this.gate('ui', 0.03, 0.2)) return;
     const f = 784 * vary(TONAL);
-    this.osc(this.sfx!, t, f, 0.08, 0.1, { type: 'triangle' });
-    this.osc(this.sfx!, t + 0.07, st(f, 7), 0.18, 0.1, { type: 'triangle' });
-    this.noise(this.sfx!, t, 0.05, 0.03, 4000, { type: 'highpass' });
+    this.glass(this.sfx!, t, f, 0.11, 0.15);
+    this.glass(this.bright!, t + 0.06, st(f, 7), 0.075, 0.25);
   }
 
   back(): void {
@@ -937,16 +958,32 @@ export class Audio {
         const v = Math.min(0.35, e.speed / 2500);
         if (v < 0.015 || !this.gate('impact', 0.04, 0.15)) return;
         const d = this.at(e.pos.x);
-        if (e.material === 'bumper') {
-          this.transient(d, t, v * 0.6, 3500);
-          this.osc(d, t, 600 * vary(), 0.16, v * 0.5, { type: 'triangle', to: 1150, glide: 0.06 });
-          this.osc(d, t, 1200 * vary(), 0.08, v * 0.2);
-        } else if (e.material === 'metal' || e.material === 'post') {
-          this.transient(d, t, v * 0.6, 4000);
-          this.ring(d, t, 700 * vary(), v * 0.5, 0.5);
-        } else {
-          this.transient(d, t, v * 0.5, 1800);
-          this.osc(d, t, (90 + e.speed * 0.04) * vary(), 0.1, v * 1.3, { to: 50, glide: 0.06, attack: 0.002 });
+        switch (e.material) {
+          case 'bumper':
+            this.transient(d, t, v * 0.55, 3100);
+            this.osc(d, t, 360 * vary(), 0.15, v * 0.65, { type: 'triangle', to: 920, glide: 0.045 });
+            this.glass(d, t + 0.016, 840 * vary(), v * 0.32, 0.2);
+            break;
+          case 'metal':
+          case 'post':
+          case 'coil':
+            this.transient(d, t, v * 0.55, 3600);
+            this.ring(d, t, 430 * vary(), v * 0.48, 0.36);
+            break;
+          case 'crystal':
+          case 'rune':
+            this.glass(d, t, 760 * vary(), v * 0.78, 0.28);
+            break;
+          case 'font':
+            this.osc(d, t, 255 * vary(), 0.16, v * 0.7, { to: 460, glide: 0.06 });
+            this.noise(d, t, 0.095, v * 0.65, 2050, { q: 0.65, to: 780 });
+            break;
+          default: {
+            const slam = e.material === 'slam';
+            this.transient(d, t, v * 0.62, slam ? 1050 : 1550);
+            this.body(d, t, slam ? 76 : 112 + e.speed * 0.042, v, slam ? 0.24 : 0.115);
+            if (slam) this.noise(d, t, 0.19, v * 0.58, 600, { type: 'lowpass', to: 150 });
+          }
         }
         break;
       }
@@ -969,9 +1006,10 @@ export class Audio {
         if (!this.gate('launch', 0.08, 0.3, 2)) return;
         const p = clamp(e.power, 0, 1);
         const d = this.at(e.pos.x);
-        this.noise(d, t, 0.25, 0.12 + p * 0.15, 500 * vary(), { q: 1.5, to: 900 + 1800 * p, attack: 0.03 });
-        this.osc(d, t, 220 * vary(), 0.18, 0.08 + p * 0.08, { to: 500 + p * 500 });
-        if (p > 0.9) this.osc(d, t, 880 * vary(), 0.2, 0.06, { type: 'triangle', to: 1320, glide: 0.05 });
+        this.transient(d, t, 0.085 + p * 0.14, 1750);
+        this.body(d, t, 120 + p * 75, 0.1 + p * 0.15, 0.13);
+        this.noise(d, t + 0.008, 0.16 + p * 0.12, 0.1 + p * 0.15, 2400 * vary(), { q: 0.65, to: 420 + 420 * p, attack: 0.02 });
+        this.glass(d, t + 0.025, 420 + p * 310, 0.07 * p, 0.13 + p * 0.16);
         break;
       }
       case 'reaction': {
@@ -982,9 +1020,11 @@ export class Audio {
         const big = e.targets >= 3 || e.kills > 0 || e.depth >= 2 || e.onBoss || e.radius > 120;
         const v = Math.max(0.1, 0.16 + (big ? 0.06 : 0) - e.depth * 0.01);
         const d = this.at(e.pos.x);
-        this.transient(d, t, v * 0.9, 1800, 0.025);
-        this.body(d, t, base * up, v * 0.8, 0.2);
-        for (const el of els) this.tail(el, d, t + 0.01, base * up, v * (els.length > 1 ? 0.75 : 1));
+        this.transient(d, t, v * 0.8, 1900, 0.023);
+        this.body(d, t, base * up, v * 0.7, 0.19);
+        els.forEach((el, i) => this.tail(el, d, t + 0.012 + i * 0.022,
+          (ELEMENT_NOTE[el] ?? base) * up, v * (els.length > 1 ? 0.68 : 1)));
+        if (e.depth > 0) this.glass(d, t + 0.035, this.comboRoot() * up, v * 0.38, 0.31);
         if (big) {
           this.osc(d, t, 70, 0.25, v * 0.8, { to: 40, attack: 0.002 });
           this.duck(0.3, 0.25);

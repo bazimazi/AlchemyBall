@@ -1,1 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0d0f14"/><defs><radialGradient id="g" cx="40%" cy="38%"><stop offset="0" stop-color="#fff"/><stop offset=".35" stop-color="#ff8a3d"/><stop offset="1" stop-color="#3aa7ff"/></radialGradient></defs><circle cx="32" cy="32" r="18" fill="url(#g)" stroke="#fff" stroke-width="2.5"/><circle cx="52" cy="22" r="3" fill="#ffe84a"/><circle cx="14" cy="44" r="3" fill="#8fe03a"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="bg" cx=".35" cy=".25" r=".78">
+      <stop stop-color="#243747"/>
+      <stop offset="1" stop-color="#080f17"/>
+    </radialGradient>
+    <linearGradient id="brass" x2=".85" y2="1">
+      <stop stop-color="#fff0ba"/>
+      <stop offset=".48" stop-color="#a37742"/>
+      <stop offset="1" stop-color="#e9bd74"/>
+    </linearGradient>
+    <linearGradient id="core" x2=".95" y2=".9">
+      <stop stop-color="#fff3bc"/>
+      <stop offset=".35" stop-color="#f77c36"/>
+      <stop offset=".57" stop-color="#8f402c"/>
+      <stop offset=".75" stop-color="#258f9c"/>
+      <stop offset="1" stop-color="#112d48"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <circle cx="32" cy="32" r="24" fill="none" stroke="url(#brass)" stroke-width="1.5"/>
+  <ellipse cx="32" cy="32" rx="25" ry="13" transform="rotate(-29 32 32)" fill="none" stroke="#c89457" opacity=".75"/>
+  <circle cx="32" cy="32" r="16.5" fill="url(#core)" stroke="#fff4d5" stroke-width="1.4"/>
+  <path d="M18 35c8-15 17 8 28-7" fill="none" stroke="#8bf7ee" stroke-width="2" stroke-linecap="round"/>
+  <path d="M22 27a12 12 0 0 1 8-7" fill="none" stroke="#fff8dc" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="m32 5 3 3-3 3-3-3zm0 48 3 3-3 3-3-3z" fill="#f7cc86"/>
+</svg>

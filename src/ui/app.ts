@@ -190,10 +190,7 @@ export class App {
           h('div', { class: 'spacer' }), this.resBar()),
         h('div', { class: 'menu-hero' },
           h('div', { class: 'hero-art', 'aria-hidden': 'true' },
-            h('div', { class: 'orbit orbit-one' }), h('div', { class: 'orbit orbit-two' }), h('div', { class: 'orbit orbit-three' }),
-            h('div', { class: 'hero-sigil' }), h('div', { class: 'hero-core' }),
-            h('span', { class: 'satellite fire' }, '△'), h('span', { class: 'satellite water' }, '▽'), h('span', { class: 'satellite frost' }, '✧'),
-            h('span', { class: 'art-label label-one' }, 'IGNIS'), h('span', { class: 'art-label label-two' }, 'AQUA'),
+            h('div', { class: 'hero-plate' }), h('div', { class: 'hero-glints' }),
           ),
           h('div', { class: 'title' }, h('div', { class: 'eyebrow' }, 'A PHYSICS-DRIVEN ALCHEMICAL ROGUELITE'), h('h1', null, 'Alchemy Ball'), h('div', { class: 'dim' }, 'Every collision changes the ball.')),
         ),
@@ -274,7 +271,7 @@ export class App {
         const open = regions.includes(r);
         const req = r.requiresBoss ? Content.bosses[r.requiresBoss]?.name : '';
         return h('button', {
-          class: `region-card${p.loadout.region === r.id ? ' selected' : ''}${open ? '' : ' locked'}`, style: `--a:${r.palette.accent};--l:${r.palette.light}`,
+          class: `region-card${p.loadout.region === r.id ? ' selected' : ''}${open ? '' : ' locked'}`, 'data-region': r.id, style: `--a:${r.palette.accent};--l:${r.palette.light}`,
           onclick: () => { if (open) { p.loadout.region = r.id; this.audio.select(); this.audio.setScene('menu', r.id); render(); } else this.audio.denied(); },
         }, h('b', null, r.name), h('span', { class: 'tiny' }, open ? r.flavor : `Defeat ${req} to unlock`), h('span', { class: 'tiny dim' }, open ? `Boss: ${Content.bosses[r.boss]?.name}` : '🔒'));
       });
@@ -318,7 +315,7 @@ export class App {
       const region = Content.regions.get(p.loadout.region)!;
       this.show(h('div', { class: 'screen prep-screen', style: `--a:${region.palette.accent}` }, h('div', { class: 'wrap' },
         h('div', { class: 'row' }, this.back(() => this.showMenu()), h('div', { class: 'spacer' }), this.resBar()),
-        h('h2', null, 'Prepare your expedition'),
+        h('h2', { class: 'prep-heading', 'data-region': region.id }, 'Prepare your expedition'),
         regions.length > 1 ? h('div', null, h('h3', null, 'Region'), h('div', { class: 'region-row' }, ...regionCards)) : null,
         h('h3', null, 'Core'),
         h('div', { class: 'small dim' }, 'Your core is the element your ball always carries. Pick up others from the arena.'),
@@ -404,7 +401,7 @@ export class App {
     const mut = run.cfg.mutator ? MUTATORS.find((m) => m.id === run.cfg.mutator) : undefined;
     const hpFrac = run.hp / run.maxHp;
     this.show(h('div', { class: 'screen map-screen', style: `--a:${region.palette.accent};--l:${region.palette.light}` }, h('div', { class: 'wrap' },
-      h('div', { class: 'row' },
+      h('div', { class: 'row map-heading', 'data-region': region.id },
         h('div', null, h('div', { class: 'eyebrow' }, run.cfg.mode === 'endless' ? `ABYSSAL DESCENT · LOOP ${run.loop + 1}` : run.cfg.mode === 'daily' ? 'DAILY EXPERIMENT' : run.cfg.heat ? `HEAT ${run.cfg.heat}` : 'EXPEDITION'), h('h2', { class: 'region-title' }, region.name)),
         h('div', { class: 'spacer' }),
         h('button', { class: 'ghost small', onclick: () => (this.audio.select(), this.showPauseMenuFromMap()) }, '☰')),
@@ -713,7 +710,7 @@ export class App {
       return h('div', { class: 'goal' }, h('div', { class: 'row tiny' }, h('span', null, g.label), h('div', { class: 'spacer' }), h('span', { class: 'dim' }, `${Math.min(g.cur, g.goal)}/${g.goal}`)), h('div', { class: 'meter' }, fill));
     });
     this.show(h('div', { class: `screen results-screen${s.won ? ' won' : ''}` }, h('div', { class: 'wrap' },
-      h('div', { class: 'title results-title' },
+      h('div', { class: 'title results-title', 'data-region': run.region.id },
         h('div', { class: 'eyebrow' }, endless ? 'ABYSSAL DESCENT' : s.mode === 'daily' ? 'DAILY EXPERIMENT' : run.region.name.toUpperCase()),
         h('h1', null, title),
         s.newRecord ? h('div', { class: 'pill gold' }, '★ New record') : null),

@@ -4,8 +4,9 @@ import { vlen, type Vec2 } from '../core/vec';
 import { PHYS, effectivePhysics } from '../sim/ballPhysics';
 import type { ArenaObject, Enemy, Telegraph, Zone } from '../sim/entities';
 import type { World } from '../sim/world';
-import type { Decal, Fx } from './fx';
-import { affixAura, circle, creature, glow, reagent, sigil } from './art';
+import type { Decal, Fx, Ring } from './fx';
+import { affixAura, circle, creature, glow, polygon, reagent, sigil } from './art';
+import { paintArena } from './arena';
 
 export interface AimState {
   active: boolean;
@@ -160,6 +161,7 @@ export class Renderer {
   private decalFade = 0;
   private vignette: HTMLCanvasElement | null = null;
   private vignetteKey = '';
+  private dangerVignette: HTMLCanvasElement | null = null;
   private world: World | null = null;
   private reducedMotion = false;
   private frameDt = 0;
@@ -252,7 +254,7 @@ export class Renderer {
     this.drawDecals(fx, dt);
     this.drawAtmosphere(pal, region?.id ?? 'cinder_marsh');
     for (const zn of w.zones) this.drawZone(zn);
-    this.drawWalls(w, pal.wall);
+    this.drawWalls(w, pal);
     for (const t of w.telegraphs) this.drawTelegraph(t);
     for (const p of w.projectiles) {
       if (!p.lob) continue;
@@ -303,14 +305,23 @@ export class Renderer {
   /** Soft region-coloured light behind the arena so the page never looks flat. */
   private drawBackdrop(pal: RegionDef['palette']): void {
     const c = this.ctx;
+    const width = PHYS.arenaW * this.scale;
+    const height = PHYS.arenaH * this.scale;
     const cx = this.ox + PHYS.arenaW * this.scale / 2;
     const cy = this.oy + PHYS.arenaH * this.scale / 2;
-    glow(c, cx, cy, Math.max(this.w, this.h) * 0.7, pal.light, 0.08);
-    glow(c, cx, this.oy, this.w * 0.6, pal.accent, 0.05);
+    glow(c, cx, cy, Math.max(this.w, this.h) * 0.7, pal.light, 0.09);
+    glow(c, cx, this.oy + height * 0.05, Math.max(width, 220), pal.accent, 0.13);
+    c.save();
+    c.translate(cx, cy);
+    c.scale(this.scale, this.scale);
+    sigil(c, 0, 0, PHYS.arenaH * 0.59, pal.light + '1c');
+    sigil(c, 0, 0, PHYS.arenaH * 0.72, pal.accent + '14', Math.PI / 6);
+    c.restore();
   }
 
   private vignetteCanvas(color: string): HTMLCanvasElement {
     const key = `${color}|${this.w}x${this.h}`;
+    if (color === '#ff1f2f' && this.dangerVignette) return this.dangerVignette;
     if (color !== '#ff1f2f' && this.vignette && this.vignetteKey === key) return this.vignette;
     const cv = document.createElement('canvas');
     cv.width = 256;
@@ -324,7 +335,7 @@ export class Renderer {
     if (color !== '#ff1f2f') {
       this.vignette = cv;
       this.vignetteKey = key;
-    }
+    } else this.dangerVignette = cv;
     return cv;
   }
 
@@ -335,65 +346,11 @@ export class Renderer {
   /** Static engraved stone is cached per region; animated illumination is a separate pass. */
   private drawFloor(pal: RegionDef['palette'], regionId: string): void {
     const W = PHYS.arenaW, H = PHYS.arenaH;
-    const { floor, accent } = pal;
-    const key = `${floor}|${accent}|${this.highContrast}|${regionId}`;
+    const key = `${pal.floor}|${pal.accent}|${pal.light}|${this.highContrast}|${regionId}`;
     if (!this.floorCache || key !== this.floorKey) {
       this.floorKey = key;
       const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
-      const c = canvas.getContext('2d')!;
-      c.beginPath(); c.moveTo(40, 0); c.lineTo(W - 40, 0); c.lineTo(W, 40); c.lineTo(W, H - 40);
-      c.lineTo(W - 40, H); c.lineTo(40, H); c.lineTo(0, H - 40); c.lineTo(0, 40); c.closePath(); c.clip();
-      c.fillStyle = floor; c.fillRect(0, 0, W, H);
-      const tint = regionId === 'frostvein' ? '140,190,220' : regionId === 'storm_spire' ? '150,130,190' : '109,145,150';
-      // Staggered slabs, with deterministic mineral flecks and worn edges.
-      for (let row = 0; row < 15; row++) for (let col = -1; col < 9; col++) {
-        const x = col * 96 + row % 2 * 48, y = row * 80;
-        const k = Math.sin(row * 127 + col * 311) * 0.5 + 0.5;
-        c.fillStyle = `rgba(${tint},${0.025 + k * 0.035})`;
-        c.fillRect(x + 2, y + 2, 92, 76);
-        c.strokeStyle = '#030b1260'; c.strokeRect(x + 1, y + 1, 94, 78);
-        c.strokeStyle = '#92c2c00b'; c.beginPath(); c.moveTo(x + 3, y + 3); c.lineTo(x + 92, y + 3); c.stroke();
-        if (k > 0.65) { c.strokeStyle = '#030b1240'; c.beginPath(); c.moveTo(x + 16, y + 2); c.lineTo(x + 24, y + 21); c.lineTo(x + 19, y + 33); c.stroke(); }
-      }
-      if (regionId === 'frostvein') {
-        // Hoarfrost veins across the stone.
-        c.strokeStyle = '#cfefff1c'; c.lineWidth = 1.2;
-        for (let i = 0; i < 26; i++) {
-          let x = ((Math.sin(i * 91.7) * 43758.5) % 1 + 1) % 1 * W, y = ((Math.sin(i * 47.3) * 12543.1) % 1 + 1) % 1 * H;
-          c.beginPath(); c.moveTo(x, y);
-          for (let j = 0; j < 6; j++) { x += Math.sin(i * 3 + j * 1.7) * 38; y += Math.cos(i * 2 + j * 2.3) * 38; c.lineTo(x, y); }
-          c.stroke();
-        }
-      } else if (regionId === 'storm_spire') {
-        // Copper conduit traces with rivet nodes.
-        c.strokeStyle = '#d6a35a22'; c.lineWidth = 2;
-        for (let i = 0; i < 14; i++) {
-          const y = 60 + i * 76, x0 = (i * 137) % 300;
-          c.beginPath(); c.moveTo(x0, y); c.lineTo(x0 + 180, y); c.lineTo(x0 + 220, y + 40); c.lineTo(x0 + 420, y + 40); c.stroke();
-          c.fillStyle = '#e8c27a33'; circle(c, x0 + 420, y + 40, 4); c.fill(); circle(c, x0, y, 3); c.fill();
-        }
-      } else {
-        // Moss and silt in the marsh grout.
-        for (let i = 0; i < 60; i++) {
-          const x = ((Math.sin(i * 12.9) * 9876.5) % 1 + 1) % 1 * W, y = ((Math.sin(i * 78.2) * 5432.1) % 1 + 1) % 1 * H;
-          c.fillStyle = i % 2 ? '#4f7a4a14' : '#2e4a3a18'; circle(c, x, y, 6 + (i % 5) * 4); c.fill();
-        }
-      }
-      const light = c.createRadialGradient(W / 2, H * 0.4, 60, W / 2, H / 2, H * 0.65);
-      light.addColorStop(0, '#47848018'); light.addColorStop(0.65, '#04111910'); light.addColorStop(1, '#00050cbb');
-      c.fillStyle = light; c.fillRect(0, 0, W, H);
-      c.strokeStyle = '#8ca58e26'; c.lineWidth = 1; c.strokeRect(23, 23, W - 46, H - 46); c.strokeRect(29, 29, W - 58, H - 58);
-      sigil(c, W / 2, H / 2, 213, '#a1bca51c');
-      sigil(c, W / 2, H / 2, 153, '#d3b67a16', Math.PI / 6);
-      for (const y of [90, H - 90]) {
-        sigil(c, W / 2, y, 38, accent + '33');
-        c.strokeStyle = accent + '25'; c.beginPath(); c.moveTo(80, y); c.lineTo(W / 2 - 56, y); c.moveTo(W / 2 + 56, y); c.lineTo(W - 80, y); c.stroke();
-      }
-      for (let i = 0; i < 900; i++) {
-        const x = ((Math.sin(i * 127.1) * 43758.5453) % 1 + 1) % 1 * W;
-        const y = ((Math.sin(i * 311.7) * 96453.912) % 1 + 1) % 1 * H;
-        c.fillStyle = i % 2 ? '#d7dfb209' : '#00000024'; c.fillRect(x, y, 1.5, 1.5);
-      }
+      paintArena(canvas.getContext('2d')!, pal, regionId, this.highContrast);
       this.floorCache = canvas;
     }
     const ctx = this.ctx;
@@ -487,31 +444,40 @@ export class Renderer {
     glow(c, PHYS.arenaW - 70, PHYS.arenaH - 120, 260, pal.accent, 0.07);
     if (this.reducedMotion) return;
     const falling = regionId === 'frostvein';
+    const charged = regionId === 'storm_spire';
     c.save();
-    for (let i = 0; i < 24 * this.quality; i++) {
-      const x = 35 + ((i * 173.3 + Math.sin(this.t * 0.2 + i) * 20) % 650 + 650) % 650;
+    for (let i = 0; i < 36 * this.quality; i++) {
+      const x = 35 + ((i * 173.3 + Math.sin(this.t * 0.3 + i) * (falling ? 35 : 16)) % 650 + 650) % 650;
       const drift = this.t * (6 + i % 4) * (falling ? -2.2 : 1);
       const y = ((i * 97.1 - drift) % 1080 + 1080) % 1080 + 20;
-      c.globalAlpha = 0.12 + Math.max(0, Math.sin(this.t + i * 4)) * 0.26;
-      c.fillStyle = pal.motes[i % pal.motes.length]; circle(c, x, y, i % 3 === 0 ? 1.8 : 1); c.fill();
+      const flicker = Math.max(0, Math.sin(this.t * (charged ? 2.3 : 1.1) + i * 4));
+      const color = pal.motes[i % pal.motes.length];
+      const size = i % 3 === 0 ? 2.1 : 1;
+      c.globalAlpha = 0.12 + flicker * 0.38;
+      c.fillStyle = color;
+      if (i % 7 === 0) glow(c, x, y, size * 7, color, 0.4);
+      c.beginPath();
+      c.ellipse(x, y, size, size * (charged ? 1.8 : 1.1), 0.5, 0, TAU);
+      c.fill();
     }
     c.restore();
   }
 
-  private drawWalls(w: World, wallColor: string): void {
+  private drawWalls(w: World, pal: RegionDef['palette']): void {
     const c = this.ctx;
     c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
     for (const wl of w.walls) {
-      const color = wl.material === 'bumper' ? '#ff62b3' : wl.material === 'metal' ? '#9bced7' : this.highContrast ? '#ffffff' : wallColor;
+      const color = wl.material === 'bumper' ? '#ff62b3' : wl.material === 'metal' ? '#9bced7' : this.highContrast ? '#ffffff' : pal.wall;
       c.beginPath(); c.moveTo(wl.a.x, wl.a.y); c.lineTo(wl.b.x, wl.b.y);
-      c.strokeStyle = '#02080c'; c.lineWidth = 19; c.stroke();
-      c.strokeStyle = color; c.lineWidth = 12; c.stroke();
-      c.strokeStyle = wl.material === 'stone' ? '#94b3ad55' : '#ffffffaa'; c.lineWidth = 2; c.stroke();
+      c.strokeStyle = '#02080c'; c.lineWidth = 22; c.stroke();
+      c.strokeStyle = wl.material === 'stone' ? pal.accent + '76' : color; c.lineWidth = 16; c.stroke();
+      c.strokeStyle = color; c.lineWidth = 11; c.stroke();
+      c.strokeStyle = wl.material === 'stone' ? pal.light + '76' : '#ffffffaa'; c.lineWidth = 2; c.stroke();
       const len = Math.hypot(wl.b.x - wl.a.x, wl.b.y - wl.a.y);
-      for (let d = 0; d <= len; d += 68) {
+      for (let d = 12; d <= len - 8; d += 64) {
         const x = wl.a.x + (wl.b.x - wl.a.x) * d / len, y = wl.a.y + (wl.b.y - wl.a.y) * d / len;
-        c.fillStyle = '#1c3038'; circle(c, x, y, 5); c.fill();
-        c.fillStyle = wl.material === 'stone' ? '#c4b17a' : color; circle(c, x, y, 1.8); c.fill();
+        c.fillStyle = '#101a23'; circle(c, x, y, 4.6); c.fill();
+        c.fillStyle = wl.material === 'stone' ? pal.light + 'c8' : color; circle(c, x - 0.5, y - 0.5, 1.8); c.fill();
       }
     }
     c.restore();
@@ -520,7 +486,7 @@ export class Renderer {
   private drawTelegraph(t: Telegraph): void {
     const ctx = this.ctx;
     const k = Math.min(1, t.t / t.dur);
-    const urgent = k > 0.75 && Math.floor(this.t * 14) % 2 === 0;
+    const urgent = k > 0.75;
     ctx.save();
     if (t.kind === 'line' && t.dir) {
       const len = t.length ?? 400;
@@ -577,21 +543,36 @@ export class Renderer {
     const hostile = z.faction === 'hostile';
     switch (z.def.look) {
       case 'pool': {
+        const molten = z.def.element === 'magma';
+        const sheen = molten ? '#ffbf70' : z.def.element === 'poison' ? '#dcf681' : '#b9fff5';
         const g = ctx.createRadialGradient(z.pos.x, z.pos.y, z.radius * 0.2, z.pos.x, z.pos.y, z.radius);
-        g.addColorStop(0, z.def.color + 'cc');
-        g.addColorStop(1, z.def.color + '55');
+        g.addColorStop(0, z.def.color + (molten ? 'e0' : '99'));
+        g.addColorStop(0.74, z.def.color + '5c');
+        g.addColorStop(1, z.def.color + '29');
         ctx.fillStyle = g;
         ctx.beginPath();
         ctx.arc(z.pos.x, z.pos.y, z.radius, 0, TAU);
         ctx.fill();
         ctx.strokeStyle = z.def.color + '88'; ctx.lineWidth = 2; ctx.stroke();
         ctx.save(); ctx.clip();
-        // Caustic ribbons and bubbles give liquid a surface without obscuring actors.
+        // Magma has glowing seams. Cool liquids carry broad caustic ripples.
         for (let i = 0; i < 5; i++) {
           const phase = this.t * 0.7 + i * 2 + z.uid;
-          ctx.globalAlpha = fade * own * 0.22;
-          ctx.strokeStyle = '#cff6e9'; ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.ellipse(z.pos.x + Math.sin(phase) * z.radius * 0.18, z.pos.y + (i - 2) * z.radius * 0.3, z.radius * 0.8, 5 + Math.sin(phase) * 3, -0.15, 0, TAU); ctx.stroke();
+          const y = z.pos.y + (i - 2) * z.radius * 0.31;
+          ctx.globalAlpha = fade * own * (molten ? 0.45 : 0.27);
+          ctx.strokeStyle = sheen;
+          ctx.lineWidth = molten ? 2 : 1.4;
+          ctx.beginPath();
+          if (molten) {
+            for (let j = 0; j <= 6; j++) {
+              const x = z.pos.x + (j - 3) * z.radius * 0.32;
+              const offset = Math.sin(i * 4 + j * 6) * z.radius * 0.12 + Math.sin(phase) * 3;
+              if (j === 0) ctx.moveTo(x, y + offset); else ctx.lineTo(x, y + offset);
+            }
+          } else {
+            ctx.ellipse(z.pos.x + Math.sin(phase) * z.radius * 0.18, y, z.radius * 0.8, 5 + Math.sin(phase) * 3, -0.15, 0, TAU);
+          }
+          ctx.stroke();
           const bx = z.pos.x + Math.sin(i * 13 + z.uid) * z.radius * 0.7;
           const by = z.pos.y + z.radius * 0.7 - ((this.t * 9 + i * 31) % (z.radius * 1.4));
           circle(ctx, bx, by, 2 + i % 3); ctx.stroke();
@@ -607,11 +588,12 @@ export class Renderer {
         break;
       }
       case 'cloud': {
+        const turn = this.t * 0.25 + z.uid;
+        glow(ctx, z.pos.x, z.pos.y, z.radius, z.def.color, 0.18);
         for (let i = 0; i < 6; i++) {
-          const a = (i / 6) * TAU + this.t * 0.3 + z.uid;
-          const r = z.radius * 0.55;
-          ctx.globalAlpha = fade * own;
-          glow(ctx, z.pos.x + Math.cos(a) * r * 0.7, z.pos.y + Math.sin(a) * r * 0.6, r * 1.25, z.def.color, 0.25);
+          const a = i / 6 * TAU + turn;
+          const r = z.radius * (0.48 + 0.07 * Math.sin(a * 2 + i));
+          glow(ctx, z.pos.x + Math.cos(a) * r * 0.78, z.pos.y + Math.sin(a) * r * 0.63, r * 1.25, z.def.color, 0.27);
         }
         break;
       }
@@ -633,7 +615,15 @@ export class Renderer {
           ctx.strokeStyle = '#e6fbff'; ctx.globalAlpha = fade * 0.55;
           for (let i = 0; i < 6; i++) {
             const a = i * Math.PI / 3 + z.uid;
-            ctx.beginPath(); ctx.moveTo(z.pos.x, z.pos.y); ctx.lineTo(z.pos.x + Math.cos(a) * z.radius * 0.8, z.pos.y + Math.sin(a) * z.radius * 0.8); ctx.stroke();
+            const x = z.pos.x + Math.cos(a) * z.radius * 0.38;
+            const y = z.pos.y + Math.sin(a) * z.radius * 0.38;
+            ctx.beginPath();
+            ctx.moveTo(z.pos.x, z.pos.y);
+            ctx.lineTo(x, y);
+            ctx.lineTo(z.pos.x + Math.cos(a + 0.1) * z.radius * 0.79, z.pos.y + Math.sin(a + 0.1) * z.radius * 0.79);
+            ctx.moveTo(x, y);
+            ctx.lineTo(z.pos.x + Math.cos(a - 0.36) * z.radius * 0.67, z.pos.y + Math.sin(a - 0.36) * z.radius * 0.67);
+            ctx.stroke();
           }
         } else if (z.def.element === 'fire' && !this.reducedMotion) {
           ctx.fillStyle = '#ffd27a';
@@ -825,9 +815,10 @@ export class Renderer {
       const p = this.trail[i], prev = this.trail[i - 1], k = p.life / life;
       if (Math.hypot(p.x - prev.x, p.y - prev.y) > 160) continue;
       const col = rainbow ? `hsl(${(p.i * 18 + this.t * 200) % 360},90%,62%)` : voidStyle ? '#120a1c' : p.c;
-      ctx.strokeStyle = col; ctx.globalAlpha = k * (voidStyle ? 0.7 : 0.28); ctx.lineWidth = b.radius * 1.8 * k;
+      ctx.strokeStyle = col; ctx.globalAlpha = k * (voidStyle ? 0.7 : 0.11); ctx.lineWidth = b.radius * 2.1 * k;
       ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(p.x, p.y); ctx.stroke();
-      ctx.strokeStyle = voidStyle ? '#c77dff' : '#ffffff'; ctx.globalAlpha = k * 0.42; ctx.lineWidth = 3 * k; ctx.stroke();
+      ctx.globalAlpha = k * 0.48; ctx.lineWidth = b.radius * 0.78 * k; ctx.stroke();
+      ctx.strokeStyle = voidStyle ? '#c77dff' : '#fff1d5'; ctx.globalAlpha = k * 0.6; ctx.lineWidth = 3.4 * k; ctx.stroke();
     }
     ctx.restore();
     // Combo halo grows with the shot combo.
@@ -860,7 +851,8 @@ export class Renderer {
     }
     const skin = this.style.skin;
     const sk = skin?.colors ?? [];
-    const g = ctx.createRadialGradient(-5, -5, 2, 0, 0, b.radius);
+    const r = b.radius;
+    const g = ctx.createRadialGradient(-r * 0.3, -r * 0.42, r * 0.06, 0, 0, r);
     if (skin && skin.id !== 'skin_glass' && sk.length >= 2) {
       const aurora = skin.id === 'skin_aurora';
       g.addColorStop(0, '#ffffff');
@@ -868,23 +860,31 @@ export class Renderer {
       g.addColorStop(0.75, aurora ? `hsl(${(this.t * 60 + 120) % 360},70%,45%)` : sk[1]);
       g.addColorStop(1, '#0b1018');
     } else {
-      g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.35, main.color);
-      g.addColorStop(0.72, iron ? '#687782' : second ? second.color : main.color);
-      g.addColorStop(1, '#172536');
+      g.addColorStop(0, '#fffbdf');
+      g.addColorStop(0.22, main.color);
+      g.addColorStop(0.57, iron ? '#687782' : '#151f30');
+      g.addColorStop(0.85, second?.color ?? main.color);
+      g.addColorStop(1, '#101b2b');
     }
     ctx.fillStyle = g;
     circle(ctx, 0, 0, b.radius);
     ctx.fill();
     // Core swirl: the carried elements visibly churn inside the glass.
-    if (!this.reducedMotion) {
+    if (!skin || skin.id === 'skin_glass') {
       ctx.save();
-      circle(ctx, 0, 0, b.radius - 2); ctx.clip();
-      ctx.globalAlpha = 0.55;
-      ctx.strokeStyle = skin && skin.id !== 'skin_glass' ? main.color : second?.color ?? '#ffffff';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.arc(0, 0, b.radius * 0.55, this.t * 4, this.t * 4 + 2.2); ctx.stroke();
-      ctx.beginPath(); ctx.arc(0, 0, b.radius * 0.3, -this.t * 6, -this.t * 6 + 1.8); ctx.stroke();
+      circle(ctx, 0, 0, r - 1); ctx.clip();
+      ctx.rotate(this.reducedMotion ? -0.65 : -0.65 + this.t * 1.9);
+      ctx.globalAlpha = 0.78;
+      ctx.strokeStyle = second?.color ?? main.color;
+      ctx.lineWidth = r * 0.24;
+      ctx.beginPath();
+      ctx.moveTo(-r, r * 0.28);
+      ctx.bezierCurveTo(-r * 0.45, -r * 0.75, r * 0.34, r * 0.8, r * 0.9, -r * 0.52);
+      ctx.stroke();
+      ctx.strokeStyle = '#fff8dd';
+      ctx.globalAlpha = 0.72;
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
       ctx.restore();
     }
     if (skin?.id === 'skin_brass') {
@@ -904,12 +904,15 @@ export class Renderer {
       glow(ctx, 0, 0, b.radius * 2.2, '#ffd23a', 0.25);
     }
     // Always-visible outline keeps the ball trackable in chaos.
-    ctx.strokeStyle = b.invuln > 0 && Math.floor(this.t * 20) % 2 ? '#ff4a4a' : skin?.id === 'skin_gilded' ? '#ffe9a8' : '#ffffff';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = b.invuln > 0 && Math.floor(this.t * 20) % 2 ? '#ff4a4a' : skin?.id === 'skin_gilded' ? '#ffe9a8' : '#fff9e9';
+    ctx.lineWidth = 2.2;
     circle(ctx, 0, 0, b.radius);
     ctx.stroke();
-    ctx.fillStyle = '#ffffffaa';
-    ctx.beginPath(); ctx.ellipse(-4, -6, 6, 3, -0.5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#ffffffdf';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.77, Math.PI * 1.03, Math.PI * 1.54); ctx.stroke();
+    ctx.fillStyle = '#ffffffdb';
+    circle(ctx, r * 0.44, -r * 0.54, r * 0.09); ctx.fill();
     ctx.restore();
     if (b.shield > 0) {
       ctx.strokeStyle = '#bdf3ff';
@@ -1077,19 +1080,43 @@ export class Renderer {
   }
 
   // ─── FX ─────────────────────────────────────────────────────────────────────
+  private drawReactionCrest(r: Ring, k: number): void {
+    if (!r.crest || r.r < 12 || this.reducedMotion) return;
+    const c = this.ctx;
+    const { kind, color } = r.crest;
+    const sides = kind === 'frost' ? 6 : kind === 'crack' ? 5 : 8;
+    const turn = (1 - k) * 0.55 - Math.PI / 2;
+    c.strokeStyle = color;
+    c.globalAlpha = k * 0.65;
+    c.lineWidth = 1.6;
+    if (kind === 'frost' || kind === 'crack') {
+      polygon(c, r.x, r.y, r.r * 0.93, sides, turn);
+      c.stroke();
+    }
+    for (let i = 0; i < sides; i++) {
+      const a = turn + TAU * i / sides;
+      if (kind === 'splash') {
+        circle(c, r.x + Math.cos(a) * r.r * 1.08, r.y + Math.sin(a) * r.r * 1.08, 1.5 + 3 * k);
+      } else {
+        c.beginPath();
+        c.arc(r.x, r.y, r.r * 1.1, a - 0.15 * k, a + 0.19 * k);
+      }
+      c.stroke();
+    }
+  }
+
   private drawFx(fx: Fx): void {
     const ctx = this.ctx;
     // Smoke first (normal blending), then additive light.
     for (const p of fx.particles) {
       if (!p.active || p.kind !== 4) continue;
       const k = p.life / p.max;
-      ctx.globalAlpha = k * 0.18;
-      ctx.fillStyle = p.color;
-      circle(ctx, p.x, p.y, p.size * (1.6 - k * 0.6)); ctx.fill();
+      glow(ctx, p.x, p.y, p.size * (2.2 - k * 0.8), p.color, k * 0.32);
     }
     ctx.globalCompositeOperation = 'lighter';
     for (const r of fx.rings) {
       const k = Math.max(0, r.life / r.max);
+      ctx.globalAlpha = 1;
       if (!this.reducedMotion && this.quality >= 0.75) glow(ctx, r.x, r.y, Math.max(1, r.r), r.color, k * 0.16);
       ctx.strokeStyle = r.color;
       ctx.globalAlpha = k * 0.18;
@@ -1099,6 +1126,7 @@ export class Renderer {
       ctx.stroke();
       ctx.globalAlpha = k;
       ctx.lineWidth = Math.max(0.5, r.width * k); ctx.stroke();
+      this.drawReactionCrest(r, k);
     }
     for (const p of fx.particles) {
       if (!p.active || p.kind === 4) continue;
@@ -1110,6 +1138,10 @@ export class Renderer {
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(p.x - p.vx * 0.03, p.y - p.vy * 0.03);
+        ctx.stroke();
+        ctx.strokeStyle = '#fff5db';
+        ctx.globalAlpha = k * k * 0.65;
+        ctx.lineWidth *= 0.45;
         ctx.stroke();
       } else if (p.kind === 2) {
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx) + p.life * 3);

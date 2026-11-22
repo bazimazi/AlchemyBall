@@ -113,7 +113,11 @@ export function sigil(c: Ctx, x: number, y: number, r: number, color: string, tu
 /** Lit-from-top-left body material; (lx, ly) moves the highlight for rotated frames. */
 function material(c: Ctx, r: number, color: string, lx = -0.4, ly = -0.5): CanvasGradient {
   const g = c.createRadialGradient(lx * r, ly * r, 0, 0, 0, r * 1.2);
-  g.addColorStop(0, '#f2f5e7'); g.addColorStop(0.2, color); g.addColorStop(1, '#101c28');
+  g.addColorStop(0, '#fff2d6');
+  g.addColorStop(0.16, color);
+  g.addColorStop(0.5, color);
+  g.addColorStop(0.88, '#23313c');
+  g.addColorStop(1, '#101c28');
   return g;
 }
 
@@ -252,6 +256,8 @@ function drawBlob(c: Ctx, e: Enemy, p: Pose): void {
   // Glossy rim highlight sells the wet surface.
   c.strokeStyle = '#ffffff55'; c.lineWidth = 2;
   c.beginPath(); c.arc(-r * 0.15, -r * 0.1, r * 0.72, Math.PI * 1.08, Math.PI * 1.42); c.stroke();
+  c.strokeStyle = p.color + 'c0'; c.lineWidth = 1.6;
+  c.beginPath(); c.ellipse(0, r * 0.28, r * 0.82, r * 0.49, 0, 0.15, Math.PI - 0.15); c.stroke();
   c.fillStyle = '#ffffff28';
   for (let i = 0; i < 5; i++) { circle(c, Math.sin(i * 6 + e.uid) * r * 0.65, Math.cos(i * 4) * r * 0.65, r * (bloat ? 0.19 : 0.09)); c.fill(); }
   if (bloat) {
@@ -907,8 +913,16 @@ export function reagent(c: Ctx, o: ArenaObject, time: number): void {
   shadow(c, o.pos.x, o.pos.y, r);
   c.save(); c.translate(o.pos.x, o.pos.y); c.lineJoin = 'round'; c.lineCap = 'round';
   if (charge > 0.1) { glow(c, 0, 0, r * 3, col, charge * 0.23); sigil(c, 0, 0, r * 1.4, col + '50', 0); }
-  c.fillStyle = '#24323b'; c.strokeStyle = '#5a6b70'; c.lineWidth = 2;
+  const rim = c.createLinearGradient(-r, -r, r, r);
+  rim.addColorStop(0, '#d9bc89');
+  rim.addColorStop(0.39, '#675946');
+  rim.addColorStop(0.63, '#384651');
+  rim.addColorStop(1, '#778e8a');
+  c.fillStyle = '#182833'; c.strokeStyle = rim; c.lineWidth = 3;
   polygon(c, 0, 3, r, 8, Math.PI / 8); c.fill(); c.stroke();
+  c.strokeStyle = '#0a131c'; c.lineWidth = 1.3;
+  polygon(c, 0, 3, r * 0.86, 8, Math.PI / 8); c.stroke();
+  c.lineWidth = 2;
   c.fillStyle = material(c, r, col); c.strokeStyle = col;
   if (look === 'crystal' || look === 'boulder') {
     polygon(c, 0, -3, r, look === 'crystal' ? 4 : 7, -Math.PI / 2); c.fill(); c.stroke();

@@ -55,6 +55,7 @@ export interface Ring {
   life: number;
   max: number;
   width: number;
+  crest?: { kind: Decal['kind']; color: string };
 }
 
 /** A lasting mark on the arena floor (scorch, frost, puddle, crack). Rendered into a decal layer. */
@@ -146,8 +147,8 @@ export class Fx {
     }
   }
 
-  ring(x: number, y: number, maxR: number, color: string, life = 0.45, width = 4): void {
-    this.rings.push({ x, y, r: 4, maxR, color, life, max: life, width });
+  ring(x: number, y: number, maxR: number, color: string, life = 0.45, width = 4, crest?: Ring['crest']): void {
+    this.rings.push({ x, y, r: 4, maxR, color, life, max: life, width, crest });
     if (this.rings.length > 60) this.rings.shift();
   }
 
@@ -245,7 +246,10 @@ export class Fx {
       case 'reaction': {
         const r = Content.reactions.get(e.reactionId);
         const big = Math.max(60, e.radius);
-        this.ring(e.pos.x, e.pos.y, big, e.color, 0.5, 5);
+        const c2 = Content.elements.get(r?.inputs[1] === '*' ? r.inputs[0] : r?.inputs[1] ?? '')?.color ?? e.color;
+        const c1 = Content.elements.get(r?.inputs[0] === '*' ? r?.inputs[1] ?? '' : r?.inputs[0] ?? '')?.color ?? e.color;
+        const mark = r ? reactionDecal(r.id, r.inputs) : 'glow';
+        this.ring(e.pos.x, e.pos.y, big, e.color, 0.5, 5, { kind: mark, color: c2 });
         this.ring(e.pos.x, e.pos.y, big * 0.6, '#ffffff', 0.3, 2);
         const crystal = r?.inputs.includes('ice') || r?.inputs.includes('earth');
         const charged = r?.inputs.includes('lightning');
@@ -253,8 +257,6 @@ export class Fx {
         this.emit(e.pos.x, e.pos.y, 18 + e.targets * 3, e.color, 380, { life: 0.7, size: crystal ? 6 : 3, drag: 2.5, kind: crystal ? 2 : charged ? 1 : 0 });
         this.emit(e.pos.x, e.pos.y, 10, '#fff4d6', 520, { life: 0.35, kind: 1, size: 2, drag: 3 });
         if (smoky) this.emit(e.pos.x, e.pos.y, 6, e.color, 90, { life: 1.1, kind: 4, size: 18, drag: 1.5, ay: -30 });
-        const c2 = Content.elements.get(r?.inputs[1] === '*' ? r.inputs[0] : r?.inputs[1] ?? '')?.color ?? e.color;
-        const c1 = Content.elements.get(r?.inputs[0] === '*' ? r?.inputs[1] ?? '' : r?.inputs[0] ?? '')?.color ?? e.color;
         this.text(e.pos.x, e.pos.y - 38 - e.depth * 16, r?.name ?? e.reactionId, c1, 18 + (r?.rarity === 'rare' ? 4 : 0) + Math.min(e.targets, 4), 1.15, 'reaction',
           { color2: c2, sub: e.depth >= 1 ? `CHAIN ×${e.depth + 1}` : e.targets >= 3 ? `${e.targets} TARGETS` : undefined });
         this.addShake(2 + e.targets * 0.8);
@@ -263,7 +265,7 @@ export class Fx {
           this.addFlash(e.color, 0.12);
           this.punchZoom(0.03, e.pos);
         }
-        if (r) this.decal({ x: e.pos.x, y: e.pos.y, r: Math.min(90, big * 0.55), color: e.color, kind: reactionDecal(r.id, r.inputs) });
+        if (r) this.decal({ x: e.pos.x, y: e.pos.y, r: Math.min(90, big * 0.55), color: e.color, kind: mark });
         break;
       }
       case 'arc':
@@ -300,8 +302,8 @@ export class Fx {
         this.addShake(6);
         break;
       case 'launch':
-        this.ring(e.pos.x, e.pos.y, 48, '#c6f2ef', 0.35, 2);
-        this.emit(e.pos.x, e.pos.y, 10, '#ffffff', 200, { dir: { x: -e.dir.x, y: -e.dir.y }, spread: 0.9, life: 0.35, kind: 1 });
+        this.ring(e.pos.x, e.pos.y, 37 + e.power * 28, '#c6f2ef', 0.35, 2.5);
+        this.emit(e.pos.x, e.pos.y, 7 + e.power * 8, '#ffedc5', 150 + e.power * 170, { dir: { x: -e.dir.x, y: -e.dir.y }, spread: 0.9, life: 0.35, kind: 1 });
         this.addKick(-e.dir.x, -e.dir.y, 2 + e.power * 3);
         break;
       case 'brake':
