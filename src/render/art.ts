@@ -227,11 +227,14 @@ export function creature(c: Ctx, e: Enemy, time: number, target: { x: number; y:
   else if (id === 'mireling') { drawMireling(c, e, p); stdEyes = false; }
   else if (id === 'kite') { drawKite(c, e, p); stdEyes = false; }
   else if (id === 'mote') { drawMote(c, e, p); stdEyes = false; }
+  else if (id === 'scribe') { drawScribe(c, p); stdEyes = false; }
+  else if (id === 'inkwarden') { drawInkWarden(c, p); stdEyes = false; }
   else if (id === 'rimeguard') { drawRimeguard(c, p); stdEyes = false; }
   else if (id === 'conductor') { drawConductor(c, e, p); stdEyes = false; }
   else if (id === 'golem') { drawGolem(c, p); stdEyes = false; }
   else if (id === 'matriarch') { drawMatriarch(c, e, p); stdEyes = false; }
   else if (id === 'tempest') { drawTempest(c, e, p); stdEyes = false; }
+  else if (id === 'orrery') { drawOrrery(c, e, p); stdEyes = false; }
   else { drawMechanical(c, e, p); stdEyes = id !== 'sentinel' && !e.isBoss; }
 
   if (stdEyes && !e.isBoss) eyes(c, gaze, 0, -r * 0.1, r * 0.32, 0, r * 0.19, r * 0.24, r * 0.075, 2);
@@ -244,6 +247,65 @@ export function creature(c: Ctx, e: Enemy, time: number, target: { x: number; y:
 }
 
 // ── Common foes ─────────────────────────────────────────────────────────────
+
+function drawScribe(c: Ctx, p: Pose): void {
+  const { r, phase } = p;
+  c.fillStyle = material(c, r, p.color);
+  for (const side of [-1, 1]) {
+    const tip = r * (0.29 + Math.sin(phase) * 0.18);
+    c.beginPath();
+    c.moveTo(0, r * 0.34);
+    c.lineTo(side * r * 1.24, tip);
+    c.quadraticCurveTo(side * r * 0.75, -r * 0.87, 0, -r * 0.62);
+    c.closePath();
+    c.fill(); c.stroke();
+    c.strokeStyle = '#d0f6e7';
+    c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(0, r * 0.18); c.lineTo(side * r * 0.62, -r * 0.2); c.stroke();
+    c.strokeStyle = OUTLINE;
+    c.lineWidth = 3;
+  }
+  c.fillStyle = '#0a2228';
+  polygon(c, 0, 0, r * 0.62, 4, 0); c.fill(); c.stroke();
+  eyes(c, p.gaze, 0, 0, r * 0.2, 0, r * 0.14, r * 0.17, r * 0.07, 2);
+}
+
+function drawInkWarden(c: Ctx, p: Pose): void {
+  const { r } = p;
+  c.fillStyle = material(c, r, '#84795b');
+  polygon(c, 0, 0, r * 1.05, 6, 0); c.fill(); c.stroke();
+  c.strokeStyle = '#c5a473'; c.lineWidth = 2.5;
+  polygon(c, 0, 0, r * 0.82, 6, 0); c.stroke();
+  c.fillStyle = material(c, r, p.color);
+  polygon(c, 0, r * 0.14, r * 0.63, 4, 0); c.fill();
+  c.strokeStyle = OUTLINE; c.stroke();
+  eyes(c, p.gaze, 0, r * 0.03, r * 0.23, 0, r * 0.16, r * 0.21, r * 0.08, 2);
+  c.fillStyle = '#142a1b';
+  for (const x of [-0.28, 0, 0.28]) { circle(c, r * x, r * 0.48, r * 0.075); c.fill(); }
+}
+
+function drawOrrery(c: Ctx, e: Enemy, p: Pose): void {
+  const { r, t } = p;
+  const light = coreColor(e);
+  c.fillStyle = '#16112a';
+  polygon(c, 0, 0, r * 0.92, 8, Math.PI / 8); c.fill(); c.stroke();
+  glow(c, 0, 0, r * 1.85, light, 0.35);
+  for (let i = 0; i < 3; i++) {
+    c.save();
+    c.rotate((i - 1) * Math.PI / 3 + t * 0.3 * (i === 1 ? -1 : 1));
+    c.beginPath(); c.ellipse(0, 0, r * (1.12 - i * 0.07), r * (0.38 + i * 0.12), 0, 0, Math.PI * 2);
+    c.lineWidth = 7; c.strokeStyle = '#120d1c'; c.stroke();
+    c.lineWidth = 3; c.strokeStyle = i === 1 ? '#e7b87d' : '#ad91d9'; c.stroke();
+    c.fillStyle = light;
+    polygon(c, r * (1.12 - i * 0.07), 0, 4, 4, 0); c.fill();
+    c.restore();
+  }
+  c.fillStyle = light;
+  circle(c, 0, 0, r * 0.46); c.fill();
+  c.fillStyle = e.hitFlash > 0 ? '#fbe9ff' : '#1c122b';
+  circle(c, r * 0.1, -r * 0.06, r * 0.39); c.fill();
+  c.fillStyle = '#fbf2dd'; polygon(c, -r * 0.28, r * 0.15, 6, 4, 0); c.fill();
+}
 
 function drawBlob(c: Ctx, e: Enemy, p: Pose): void {
   const { r, phase } = p, bloat = e.def.id === 'bloat';

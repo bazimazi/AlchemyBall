@@ -1,7 +1,8 @@
-import { Content } from '../content';
+import { Content, MAX_HEAT } from '../content';
 import type { ResearchNode } from '../content/types';
 import type { SavedRun } from './run';
 import { SaveSlot, type KeyValueStore } from './save';
+import { trialFor, type TrialId } from './trials';
 
 export const SAVE_VERSION = 3;
 export const SAVE_KEY = 'alchemyball.profile';
@@ -77,7 +78,9 @@ export interface Profile {
   /** Reaction ids whose hints were revealed by Research Caches. */
   revealed: string[];
   tutorialDone: boolean;
-  loadout: { core: string; shell: string; socket?: string; region: string; aspects: Record<string, string> };
+  loadout: { core: string; shell: string; socket?: string; region: string; aspects: Record<string, string>; trial?: TrialId };
+  /** Highest Heat cleared, keyed by trial, region and core. */
+  trialRecords: Record<string, number>;
   daily: Record<string, { score: number; won: boolean }>;
   heat: number;
   maxHeatWon: number;
@@ -138,6 +141,7 @@ export function freshProfile(): Profile {
     revealed: [],
     tutorialDone: false,
     loadout: { core: 'ember', shell: 'glass', region: 'cinder_marsh', aspects: {} },
+    trialRecords: {},
     daily: {},
     heat: 0,
     maxHeatWon: -1,
@@ -159,6 +163,12 @@ function normalize(d: Partial<Profile>): Profile {
   p.stats = { ...f.stats, ...(d.stats ?? {}) };
   p.loadout = { ...f.loadout, ...(d.loadout ?? {}) };
   p.loadout.aspects ??= {};
+  if (!trialFor(p.loadout.trial)) delete p.loadout.trial;
+  p.trialRecords = Object.fromEntries(Object.entries(d.trialRecords ?? {}).filter(([key, heat]) => {
+    const [trial, region, core, extra] = key.split(':');
+    return !extra && trialFor(trial) && Content.regions.has(region) && Content.cores.has(core) &&
+      Number.isInteger(heat) && heat >= 0 && heat <= MAX_HEAT;
+  }));
   p.cosmetics = { ...f.cosmetics, ...(d.cosmetics ?? {}) };
   for (const id of f.cosmetics.owned) if (!p.cosmetics.owned.includes(id)) p.cosmetics.owned.push(id);
   p.cores ??= {};

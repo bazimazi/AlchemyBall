@@ -15,6 +15,11 @@ export interface CosmeticDef {
 }
 
 export const COSMETICS: CosmeticDef[] = [
+  { id: 'trail_gilt', kind: 'trail', name: 'Gilt Rebound', description: 'Hammered gold sparks follow each shot.', unlock: 'Earn 9 Ricochet medals', colors: ['#a96336', '#ffd17b', '#ffefbb'], style: 'sparks' },
+  { id: 'skin_amethyst', kind: 'skin', name: 'Amethyst Reactor', description: 'A glass vessel veined with amethyst.', unlock: 'Earn 9 Catalyst medals', colors: ['#9a7aef', '#38266f'] },
+  { id: 'trail_ion', kind: 'trail', name: 'Ion Wake', description: 'A bright mint ribbon with an ivory edge.', unlock: 'Earn 9 Pursuit medals', colors: ['#63e4c7', '#cffff0'], style: 'ribbon' },
+  { id: 'trail_eclipse', kind: 'trail', name: 'Eclipse Flare', description: 'Violet and mint sparks in an orbital wake.', unlock: 'Feat: Total Eclipse', colors: ['#a67fed', '#66e1b7', '#fff3e0'], style: 'sparks' },
+  { id: 'skin_porcelain', kind: 'skin', name: 'Glazed Porcelain', description: 'Pale ceramic with a band of burnt copper.', unlock: 'Earn 9 Glass medals', colors: ['#fff0d7', '#b76a51'] },
   { id: 'trail_default', kind: 'trail', name: 'Elemental Ribbon', description: 'Takes the colour of whatever you carry.', unlock: 'Always available', colors: [], style: 'ribbon' },
   { id: 'trail_ember', kind: 'trail', name: 'Ember Wake', description: 'A trail of drifting embers.', unlock: 'Reach player level 5', colors: ['#ff8a3d', '#ffd27a'], style: 'flame' },
   { id: 'trail_comet', kind: 'trail', name: 'Comet Tail', description: 'A bright white-gold streak.', unlock: 'Reach player level 10', colors: ['#fff6d8', '#ffd23a'], style: 'ribbon' },

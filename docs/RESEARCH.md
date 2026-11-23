@@ -1,4 +1,53 @@
-# Research: what makes this kind of game world-class
+# Alchemy Ball design research
+
+## The Observatory update
+
+The research reviewed official game descriptions, developer talks and patch notes, platform accessibility guidance, and a study of player motivation. It covered physics games, elemental combat, and replayable progression from studios and authors in Japan, China, Finland, France, Canada, Italy, and the US. The comparisons informed design choices for Alchemy Ball's real-time arena combat.
+
+### Shot readability and combat feel
+
+| Reference | Finding | Application in Alchemy Ball |
+| --- | --- | --- |
+| Red Nexus Games, Canada, and Wonderbelly Games, US | Peglin and Roundguard combine physics shots with run builds and encounter variety. Their shot decisions start with a visible target and a learnable physical rule. | The aim guide estimates travel against drag and restitution, marks the likely contact, and stops when the predicted shot falls below useful impact speed. Keyboard aiming uses the same preview and launch as drag. [Peglin developer listing](https://store.steampowered.com/app/1296610/Peglin/), [Wonderbelly Games](https://www.wonderbellygames.com/) |
+| Aladdin X, Japan, and Gabriele Cirulli, Italy | Suika Game and 2048 apply a predictable collision rule that players can repeat and plan around. Suika's alternate modes change the pressure around that rule. | Each Trial states its trade-off during preparation and on the route screen. The standard launch and reaction rules stay familiar across trials. [Suika Game rules](https://suikagame.jp/about/), [Original 2048](https://classic.play2048.co/) |
+| HoYoverse, China, and Nolla Games, Finland | Elemental interactions can be the tactical decision itself. HoYoverse describes designing encounters around reactions, and Noita shows how familiar substances can combine into different physical outcomes. | Pulse uses Alchemy Ball's existing reaction engine. Its effect depends on the chosen core and what enemies are already carrying. The Archive provides reagents and enemy auras that support several counters. [HoYoverse developer discussion](https://genshin.hoyoverse.com/en/news/detail/124539), [Noita](https://www.noitagame.com/) |
+| Enhance, Japan and US | Tetris Effect's Zone is a player-timed resource with both defensive and scoring uses. The audiovisual feedback makes the state change clear. | Players can spend Resonance to answer an incoming volley or wait to spread their core element to several foes. Readiness has a text and audio cue, and the cast has a distinct ring, chime, and haptic pattern. [Tetris Effect: Connected](https://www.tetriseffect.game/connected/) |
+| Martin Jonasson and Petri Purho, Sweden and Finland | Their GDC demonstration shows how small, layered feedback changes can make the same mechanic feel more responsive. | Launch effects, hit effects, and Resonance use different visual and audio signatures. The orb interpolates between fixed simulation steps to reduce visible stepping on high-refresh displays. [Juice It or Lose It](https://www.gdcvault.com/play/1016789/Juice-It-or-Lose) |
+| Kenny Sun and team, US | The Ball x Pit developer documents sound design around dense, repeated impacts. The game also uses ball combinations and expanded post-clear goals to sustain experimentation. | Resonance sounds once on readiness and once on discharge. The Archive mixes pressures and reactions in four layouts, and the Trials give a reason to take those layouts on with different builds. [Sound design by Kenny Sun](https://kennysun.com/game-dev/the-sound-design-of-ball-x-pit/), [Devolver's Regal Update](https://www.devolverdigital.com/propaganda/new-characters-new-balls-a-new-mode-and-more) |
+
+A launch preview is an estimate for the current board. It accounts for drag and bounce losses. Moving enemies, floor currents, and aura changes can alter the actual path. In particular, the reagent lens withholds an enemy reaction forecast after an intervening object that could change the ball's chemistry.
+
+### Progression and accessibility
+
+- **Give difficulty a purpose.** Supergiant's Pact adds challenge through rules and its aspects create alternate ways to play. Alchemy Ball uses its existing Heat ladder for escalating difficulty and introduces four distinct Trial rules. Medal thresholds give players concrete targets for their favorite core. Collection rewards give them reasons to try unfamiliar loadouts. [Supergiant's Hades update notes](https://www.supergiantgames.com/blog/hades-updates/)
+- **Give the first clear and the fiftieth clear different jobs.** The first clear of a region points to the next boss. Each subsequent Trial clear improves a record for one core and region. Four trials, four regions, nine cores and three tiers produce up to 432 medals. The four cosmetics unlock after nine medals each, so collecting every medal is a separate completion goal. The use of named tiers and different build routes reflects research linking perceived competence and autonomy with enjoyment and preference. [Ryan, Rigby and Przybylski](https://selfdeterminationtheory.org/SDT/documents/2006_RyanRigbyPrzybylski_MandE.pdf)
+- **Make seeded modes predictable.** Mega Crit's GDC slides explain why a Daily Climb uses the same seed and choices. A new Alchemy Ball daily uses a fixed initial loadout and pool, and a resumed run keeps its start date. Personal scores remain local and accessibility settings can still differ. [Casey Yano's Slay the Spire GDC slides](https://media.gdcvault.com/gdc2019/presentations/Yano_Casey_SlayTheSpire.pdf)
+- **Give players multiple input and feedback channels.** Motion Twin's Breaking Barriers walkthrough and Microsoft's guidelines cover option-specific assistance, alternative inputs, and combining visual cues with other signals. Alchemy Ball's charge readout stays visible during play, combat supports single-key actions, core and shell selection uses native buttons, and the Codex grid supports arrow navigation. Reduced motion suppresses decorative movement and strong flashes. [Motion Twin's accessibility walkthrough](https://www.youtube.com/watch?v=joDnuQaGXsg), [Xbox Accessibility Guidelines](https://learn.microsoft.com/en-us/xbox/accessibility/guidelines)
+
+### What the evidence can establish
+
+The external references support design hypotheses about clarity, agency, and variety. Project checks cover deterministic combat, content integrity, save persistence, and browser input and layout. A scripted player can expose softlocks, timer problems, or runaway reaction chains. Human playtesting is still needed to measure first-session comprehension, boss difficulty, and whether players keep returning to Trials.
+
+The baseline simulation completed 90 Cinder Marsh runs, won 80, and encountered all 31 reactions. A separate Archive sweep ran each Trial with Ember, Tide, and Storm at Heat 0 and 7 across four seeds (`1337 + 31 × n`, `n = 0–3`). The scripted player won 10 of 48 at Heat 0 and 1 of 48 at Heat 7. These runs help identify where to focus balance playtests. The bot selects mostly direct shots and samples builds without planning, which matters for rules designed around bank shots, reaction setups, and selective use of Resonance.
+
+### Art prompts
+
+Both plates were generated with the built-in image tool and compressed as WebP for the game.
+
+<details>
+<summary>Observatory and Umbral Archive prompts</summary>
+
+**Observatory**
+
+> Use case: stylized-concept. Create the original key art for the playable home screen of Alchemy Ball, an elemental physics roguelite. Wide landscape artwork, cinematic 3:2 or wider. An ancient alchemist's observatory overlooking a rugged, foggy alpine valley at dusk. On the right half, a huge glowing translucent amber glass sphere with a swirling molten star inside, suspended within several fine engraved brass armillary rings and mounted atop a substantial weathered stone plinth. Turquoise alchemical light and faint violet nebular mist around the apparatus; rays through the open columns on the right. Atmospheric dark forest teal, midnight green, brushed bronze, warm amber accents. Premium painted game environment concept art, tactile weathered materials, strong artistic silhouette and a clear single point of interest. Composition deliberately keeps left 40 percent dark and quiet for white game title and buttons that will be overlaid in code; orb centered around 69% horizontally and 47% vertically with room around it for mobile cropping. Dark edges and foreground fade into near-black. No text, characters, watermarks, type, UI, or frames.
+
+**Umbral Archive**
+
+> Use case: stylized-concept. Wide cinematic environment key art for The Umbral Archive, an original late-game region in the dark fantasy elemental roguelite Alchemy Ball. Ancient subterranean library and astronomical engine, an enormous eclipsed violet luminous disc behind a Gothic vault, lined with dark obsidian columns, bronze astronomical instrument fragments, green luminescent vapors drifting across stepped marble. Broad view with strong silhouette, readable bright violet focal point in center-right, misty teal-green highlights in the lower third, warm bronze minute accents. Tactile painted game environment, cinematic depth, distinct violet glass and mineral surfaces. The image must read clearly when cropped into small 16:9 menu cards; keep the primary disc within the middle 60 percent of the frame. No text, people, logos, type, watermarks, UI or frames.
+
+</details>
+
+## Prior research for v0.4
 
 This document summarises the research behind the v0.4 overhaul. Two questions were investigated, using GDC talks, developer postmortems, design analyses, academic papers and player discussions:
 

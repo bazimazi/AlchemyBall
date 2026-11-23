@@ -27,7 +27,7 @@ try {
     p.research = ['res_frost', 'res_storm', 'res_iron', 'res_lab', 'res_hints', 'res_scanner', 'res_heat', 'res_shells', 'res_evolutions', 'res_merchant', 'res_events', 'res_daily', 'res_endless', 'res_banish', 'res_reroll'];
     p.seenElements = ['fire', 'water', 'ice', 'lightning', 'metal', 'earth', 'poison', 'wind', 'arcane'];
     for (const id of ['steam_burst', 'quench', 'freeze', 'shatter', 'conductive_surge', 'melt', 'searing_metal', 'toxic_combustion']) p.discovered[id] = { at: 1, count: 12, feats: ['enemy', 'ball', 'zone', 'chain'] };
-    p.stats.bossKills = { warden: 2 }; p.stats.kills = 140; p.stats.runs = 9; p.stats.wins = 2; p.maxHeatWon = 2; p.heat = 3;
+    p.stats.bossKills = { warden: 2, matriarch: 1, tempest: 1 }; p.stats.kills = 140; p.stats.runs = 9; p.stats.wins = 4; p.maxHeatWon = 2; p.heat = 3;
     p.cores = { ember: { xp: 380, level: 5, runs: 6, wins: 2, bestHeat: 2 }, frost: { xp: 60, level: 2, runs: 2, wins: 0, bestHeat: -1 } };
     p.cosmetics.owned.push('trail_ember', 'skin_brass', 'trail_comet');
     p.contracts[0].progress = p.contracts[0].goal;
@@ -36,6 +36,8 @@ try {
   await snap('01-hub');
   await page.evaluate(() => window.alchemy.showPrep());
   await snap('02-prep');
+  await page.evaluate(() => window.alchemy.showTrials('ricochet'));
+  await snap('02-trials');
   await page.evaluate(() => window.alchemy.showFeats());
   await snap('03-feats');
   await page.evaluate(() => window.alchemy.showWardrobe());
@@ -68,7 +70,7 @@ try {
     a.startLab('fire');
     const w = a.session.world;
     w.enemies.length = 0;
-    const ids = ['hound', 'mireling', 'kite', 'mote', 'rimeguard', 'conductor', 'golem', 'salamander', 'slime', 'imp', 'beetle', 'wisp'];
+    const ids = ['hound', 'mireling', 'kite', 'mote', 'rimeguard', 'conductor', 'golem', 'salamander', 'slime', 'imp', 'beetle', 'wisp', 'scribe', 'inkwarden'];
     ids.forEach((id, i) => { const e = w.spawnEnemy(id, { x: 110 + (i % 4) * 165, y: 170 + Math.floor(i / 4) * 150 }); e.spawnFx = 0; });
     const aff = ['shielded', 'swift', 'volatile', 'regenerating', 'insulated', 'enraged'];
     aff.forEach((af, i) => { const e = w.spawnEnemy('slime', { x: 90 + i * 108, y: 700 }, { affixes: [af] }); e.spawnFx = 0; e.vel = { x: 60, y: 0 }; });
@@ -78,23 +80,24 @@ try {
   await snap('10-roster', 1200);
   await page.evaluate(() => { window.alchemy.session.paused = false; });
   // Bosses.
-  for (const boss of ['warden', 'matriarch', 'tempest']) {
-    await page.evaluate((boss) => {
+  for (const [boss, element] of [['warden', 'fire'], ['matriarch', 'ice'], ['tempest', 'lightning'], ['orrery', 'arcane']]) {
+    await page.evaluate(([boss, element]) => {
       const a = window.alchemy;
       const w = a.session.world;
       w.enemies.length = 0;
       const e = w.spawnEnemy(boss, { x: 360, y: 420 }, { isBoss: true, hp: 2000, radius: 60 }); e.spawnFx = 0;
-      e.auras.set(boss === 'warden' ? 'fire' : boss === 'matriarch' ? 'ice' : 'lightning', 1);
+      e.auras.set(element, 1);
       w.addTelegraph({ x: 360, y: 420 }, 130, 2, 0, '#9fe8ff', { kind: 'nova' });
       w.addTelegraph({ x: 200, y: 760 }, 115, 2, 0, '#ff5a3a');
       w.addTelegraph({ x: 360, y: 420 }, 60, 2, 0, '#ff5a3a', { kind: 'line', dir: { x: 0.4, y: 0.9 }, length: 480 });
-    }, boss);
+    }, [boss, element]);
     await snap(`11-boss-${boss}`, 900);
   }
   // Live combat with reactions, combo and damage numbers.
   await page.evaluate(() => {
     const a = window.alchemy;
     a.session.destroy(); a.session = null;
+    a.profile.activeRun = undefined;
     a.startRun({});
     a.enterRoom('combat');
   });

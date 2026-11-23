@@ -206,6 +206,51 @@ export const REGIONS: RegionDef[] = [
       },
     ],
   },
+  {
+    id: 'umbral_archive',
+    name: 'The Umbral Archive',
+    description: 'The Tempest Engine sealed a vault of volatile reagents. Bank between its shelves and follow the eclipse.',
+    flavor: 'Poison · Wind · Arcane',
+    floors: 7,
+    tier: 3,
+    requiresBoss: 'tempest',
+    enemyPool: [
+      { id: 'scribe', weight: 5, minFloor: 0 },
+      { id: 'bloat', weight: 4, minFloor: 0 },
+      { id: 'imp', weight: 3, minFloor: 0 },
+      { id: 'mote', weight: 3, minFloor: 1 },
+      { id: 'hound', weight: 3, minFloor: 1 },
+      { id: 'sentinel', weight: 2, minFloor: 2 },
+      { id: 'beetle', weight: 2, minFloor: 2 },
+    ],
+    elitePool: ['inkwarden', 'golem', 'conductor'],
+    boss: 'orrery',
+    palette: { bg: '#0f0b19', floor: '#1c162d', wall: '#61527d', accent: '#c298ff', light: '#92dbc1', motes: ['#b78cf4', '#8df0c2'] },
+    templates: [
+      {
+        id: 'archive_stacks',
+        objects: [{ id: 'rune', x: 0.5, y: 0.3 }, { id: 'toxic_barrel', x: 0.24, y: 0.44 }, { id: 'brazier', x: 0.76, y: 0.55 }],
+        zones: [{ id: 'water_pool', x: 0.35, y: 0.66, r: 76 }],
+        walls: [{ x1: 0.18, y1: 0.25, x2: 0.18, y2: 0.42, material: 'metal' }, { x1: 0.82, y1: 0.63, x2: 0.82, y2: 0.78, material: 'metal' }],
+      },
+      {
+        id: 'sealed_rotunda',
+        objects: [{ id: 'font', x: 0.5, y: 0.4 }, { id: 'fan', x: 0.18, y: 0.67 }, { id: 'toxic_barrel', x: 0.82, y: 0.38 }, { id: 'bumper', x: 0.5, y: 0.65 }],
+        zones: [{ id: 'ice_patch', x: 0.5, y: 0.62, r: 104 }, { id: 'toxic_pool', x: 0.5, y: 0.3, r: 70 }],
+      },
+      {
+        id: 'eclipse_causeway',
+        objects: [{ id: 'brazier', x: 0.2, y: 0.66 }, { id: 'rune', x: 0.8, y: 0.66 }, { id: 'fan', x: 0.5, y: 0.37 }],
+        zones: [{ id: 'wind_current', x: 0.5, y: 0.5, r: 88 }],
+        walls: [{ x1: 0.11, y1: 0.46, x2: 0.31, y2: 0.5, material: 'bumper' }, { x1: 0.69, y1: 0.5, x2: 0.89, y2: 0.46, material: 'bumper' }],
+      },
+      {
+        id: 'ink_vault',
+        objects: [{ id: 'toxic_barrel', x: 0.28, y: 0.35 }, { id: 'toxic_barrel', x: 0.72, y: 0.35 }, { id: 'brazier', x: 0.5, y: 0.6 }, { id: 'frost_crystal', x: 0.25, y: 0.7 }, { id: 'fan', x: 0.75, y: 0.7 }],
+        zones: [{ id: 'water_pool', x: 0.5, y: 0.38, r: 76 }],
+      },
+    ],
+  },
 ];
 
 /**

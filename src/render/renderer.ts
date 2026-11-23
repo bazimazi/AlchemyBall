@@ -1,7 +1,7 @@
 import { Content, type CosmeticDef } from '../content';
 import type { RegionDef, StatusId } from '../content/types';
-import { vlen, type Vec2 } from '../core/vec';
-import { PHYS, effectivePhysics } from '../sim/ballPhysics';
+import { clamp, vlen, type Vec2 } from '../core/vec';
+import { PHYS } from '../sim/ballPhysics';
 import type { ArenaObject, Enemy, Telegraph, Zone } from '../sim/entities';
 import type { World } from '../sim/world';
 import type { Decal, Fx, Ring } from './fx';
@@ -49,20 +49,26 @@ export interface ShotPrediction {
   hitEnemy?: Enemy;
   hitObject?: ArenaObject;
   contact?: Vec2;
+  impactSpeed: number;
 }
 
-/** Ray-march the launch: walls reflect, objects reflect (as circles), the first enemy stops it. */
+/** Preview the shot against the current arena, accounting for energy lost to drag and bounces. */
 export function predictShot(w: World, dir: Vec2, power: number, bounces = 3): ShotPrediction {
   const b = w.ball;
   const r = b.radius;
+  const ph = w.physics();
+  const drag = PHYS.baseDrag * ph.dragMul;
+  const maxSpeed = PHYS.baseMaxSpeed * ph.maxSpeedMul;
+  const rest = clamp(PHYS.baseRestitution + ph.restitutionAdd, 0.3, 1.2);
+  let speed = Math.min(maxSpeed, PHYS.launchSpeed * ph.launchMul * power);
   let p = { ...b.pos };
   let d = { ...dir };
-  let remaining = 260 + 560 * power;
   const pts: Vec2[] = [{ ...p }];
   let firstSeg = 0;
   let hitEnemy: Enemy | undefined;
   let hitObject: ArenaObject | undefined;
   let contact: Vec2 | undefined;
+  let impactSpeed = 0;
   const circleHit = (cx: number, cy: number, rad: number): number => {
     // Ray p + t·d vs circle (c, rad); returns t or Infinity.
     const fx = p.x - cx, fy = p.y - cy;
@@ -73,11 +79,14 @@ export function predictShot(w: World, dir: Vec2, power: number, bounces = 3): Sh
     const t = -bq - Math.sqrt(disc);
     return t > 0.5 ? t : Infinity;
   };
-  for (let bounce = 0; bounce <= bounces && remaining > 0; bounce++) {
-    let best = remaining;
+  for (let bounce = 0; bounce <= bounces && speed > PHYS.impactMinSpeed; bounce++) {
+    // With exponential drag dv/dt = -k*v, speed falls linearly with distance travelled.
+    let best = (speed - PHYS.impactMinSpeed) / drag;
     let n: Vec2 | null = null;
     let kind: 'wall' | 'object' | 'enemy' | null = null;
     let target: Enemy | ArenaObject | undefined;
+    let restitution = rest;
+    let minExitSpeed = 0;
     for (const wl of w.walls) {
       // Offset the wall toward the ray origin by the ball radius so the contact point is the ball centre.
       const ex = wl.b.x - wl.a.x, ey = wl.b.y - wl.a.y;
@@ -93,6 +102,8 @@ export function predictShot(w: World, dir: Vec2, power: number, bounces = 3): Sh
         best = t;
         n = { x: nx, y: ny };
         kind = 'wall';
+        restitution = wl.material === 'bumper' ? 1.25 : rest;
+        minExitSpeed = wl.material === 'bumper' ? 550 : 0;
       }
     }
     for (const o of w.objects) {
@@ -116,27 +127,34 @@ export function predictShot(w: World, dir: Vec2, power: number, bounces = 3): Sh
     p = { x: p.x + d.x * best, y: p.y + d.y * best };
     pts.push({ ...p });
     if (bounce === 0) firstSeg = pts.length;
-    remaining -= best;
+    speed = Math.max(0, speed - best * drag);
     if (kind === 'enemy') {
       hitEnemy = target as Enemy;
       contact = { ...p };
+      impactSpeed = Math.max(0, ((hitEnemy.pos.x - p.x) * d.x + (hitEnemy.pos.y - p.y) * d.y) * speed / (hitEnemy.radius + r));
       break;
     }
     if (kind === 'object') {
       const o = target as ArenaObject;
       const len = Math.hypot(p.x - o.pos.x, p.y - o.pos.y) || 1;
       n = { x: (p.x - o.pos.x) / len, y: (p.y - o.pos.y) / len };
+      const elastic = o.def.tags.includes('elastic');
+      restitution = elastic ? o.def.restitution : Math.min(rest, o.def.restitution + 0.1);
+      minExitSpeed = elastic ? 600 * (1 + (w.mods.bumperKick ?? 0)) : 0;
       if (!hitObject) {
         hitObject = o;
         contact = contact ?? { ...p };
+        impactSpeed = Math.max(0, -(d.x * n.x + d.y * n.y) * speed);
       }
     }
     if (!n) break;
-    const dn = d.x * n.x + d.y * n.y;
-    d = { x: d.x - 2 * dn * n.x, y: d.y - 2 * dn * n.y };
-    remaining *= 0.82;
+    const dn = (1 + restitution) * (d.x * n.x + d.y * n.y);
+    const vx = d.x - dn * n.x, vy = d.y - dn * n.y;
+    const ratio = Math.hypot(vx, vy) || 1;
+    d = { x: vx / ratio, y: vy / ratio };
+    speed = Math.min(maxSpeed, Math.max(speed * ratio, minExitSpeed));
   }
-  return { pts, firstSeg, hitEnemy, hitObject, contact };
+  return { pts, firstSeg, hitEnemy, hitObject, contact, impactSpeed };
 }
 
 /**
@@ -188,8 +206,8 @@ export class Renderer {
     this.canvas.style.height = `${h}px`;
     // Reserve room for the HUD at the top and bottom.
     const css = getComputedStyle(document.documentElement);
-    const top = 92 + (parseFloat(css.getPropertyValue('--safe-top')) || 0);
-    const bottom = 60 + (parseFloat(css.getPropertyValue('--safe-bottom')) || 0);
+    const top = 124 + (parseFloat(css.getPropertyValue('--safe-top')) || 0);
+    const bottom = 111 + (parseFloat(css.getPropertyValue('--safe-bottom')) || 0);
     const s = Math.max(0.05, Math.min((w - 24) / PHYS.arenaW, (h - top - bottom) / PHYS.arenaH));
     this.scale = s;
     this.ox = (w - PHYS.arenaW * s) / 2;
@@ -207,7 +225,7 @@ export class Renderer {
     return { x: (sx - this.ox) / this.scale, y: (sy - this.oy) / this.scale };
   }
 
-  draw(w: World, fx: Fx, region: RegionDef | undefined, aim: AimState, dt: number): void {
+  draw(w: World, fx: Fx, region: RegionDef | undefined, aim: AimState, dt: number, orb: Vec2 = w.ball.pos): void {
     this.reducedMotion = fx.reducedMotion;
     this.frameDt = dt;
     if (!this.reducedMotion) this.t += dt;
@@ -280,7 +298,7 @@ export class Renderer {
       ctx.fillStyle = '#050c1830';
       ctx.fillRect(0, 0, PHYS.arenaW, PHYS.arenaH);
     }
-    this.drawBall(w, aim, fx);
+    this.drawBall(w, aim, fx, orb);
     this.drawFx(fx);
     if (aim.active) this.drawAimOverlay(w, aim);
 
@@ -503,7 +521,8 @@ export class Renderer {
       // Chevrons point the way.
       ctx.lineWidth = 4;
       for (let x = 60; x < len; x += 90) {
-        ctx.beginPath(); ctx.moveTo(x - 14, -16); ctx.lineTo(x, 0); ctx.lineTo(x - 14, 16); ctx.stroke();
+        const tip = Math.min(wdt * 0.45, 16);
+        ctx.beginPath(); ctx.moveTo(x - 14, -tip); ctx.lineTo(x, 0); ctx.lineTo(x - 14, tip); ctx.stroke();
       }
     } else if (t.kind === 'nova') {
       ctx.globalAlpha = 0.35 + 0.5 * k;
@@ -783,7 +802,7 @@ export class Renderer {
   }
 
   // ─── Ball ───────────────────────────────────────────────────────────────────
-  private drawBall(w: World, aim: AimState, fx: Fx): void {
+  private drawBall(w: World, aim: AimState, fx: Fx, orb: Vec2): void {
     const ctx = this.ctx;
     const b = w.ball;
     const auras = w.ballAuras().filter((a) => Content.elements.get(a.element)?.tier !== 'hidden');
@@ -798,12 +817,12 @@ export class Renderer {
     this.trail = this.trail.filter((p) => p.life > 0);
     if (speed > 80 && this.frameDt > 0) {
       const i = this.trailSeq++;
-      this.trail.push({ x: b.pos.x, y: b.pos.y, c: tcolors[i % tcolors.length], life, i });
+      this.trail.push({ x: orb.x, y: orb.y, c: tcolors[i % tcolors.length], life, i });
       if (!this.reducedMotion && trail?.style && trail.style !== 'ribbon' && Math.random() < 0.6) {
         const col = tcolors[Math.floor(Math.random() * tcolors.length)];
-        if (trail.style === 'flame') fx.emit(b.pos.x, b.pos.y, 1, col, 40, { life: 0.5, size: 3, ay: -60, drag: 2 });
-        else if (trail.style === 'sparks') fx.emit(b.pos.x, b.pos.y, 1, col, 30, { life: 0.6, size: 2, kind: 3, drag: 3 });
-        else if (trail.style === 'void') fx.emit(b.pos.x, b.pos.y, 1, '#c77dff', 20, { life: 0.6, size: 10, kind: 4, drag: 2 });
+        if (trail.style === 'flame') fx.emit(orb.x, orb.y, 1, col, 40, { life: 0.5, size: 3, ay: -60, drag: 2 });
+        else if (trail.style === 'sparks') fx.emit(orb.x, orb.y, 1, col, 30, { life: 0.6, size: 2, kind: 3, drag: 3 });
+        else if (trail.style === 'void') fx.emit(orb.x, orb.y, 1, '#c77dff', 20, { life: 0.6, size: 10, kind: 4, drag: 2 });
       }
     }
     if (this.trail.length > 72) this.trail.shift();
@@ -824,16 +843,26 @@ export class Renderer {
     // Combo halo grows with the shot combo.
     if (b.combo >= 3) {
       const hc = b.combo >= 20 ? '#ff6ad5' : b.combo >= 10 ? '#ffd23a' : '#a0e4e7';
-      glow(ctx, b.pos.x, b.pos.y, b.radius * (3 + Math.min(b.combo, 25) * 0.12), hc, 0.22);
+      glow(ctx, orb.x, orb.y, b.radius * (3 + Math.min(b.combo, 25) * 0.12), hc, 0.22);
     }
-    glow(ctx, b.pos.x, b.pos.y, b.radius * (aim.active ? 5 : 3.5), main.color, aim.active ? 0.45 : 0.3);
+    glow(ctx, orb.x, orb.y, b.radius * (aim.active ? 5 : 3.5), main.color, aim.active ? 0.45 : 0.3);
+    if (w.resonance >= 100) {
+      ctx.save();
+      ctx.strokeStyle = '#b8f8e7';
+      ctx.lineWidth = 2;
+      ctx.setLineDash(aim.active ? [4, 10] : [8, 8]);
+      ctx.globalAlpha = aim.active ? 0.34 : 0.8;
+      circle(ctx, orb.x, orb.y, aim.active ? PHYS.pulseRadius : b.radius + 10);
+      ctx.stroke();
+      ctx.restore();
+    }
     if (aim.active) this.drawAim(w, aim);
 
     // Body with squash & stretch (area-preserving along velocity) and an impact squash.
     const lightning = b.buffs.has('ballLightning');
     const iron = b.buffs.has('ironstone');
     ctx.save();
-    ctx.translate(b.pos.x, b.pos.y);
+    ctx.translate(orb.x, orb.y);
     if (!this.reducedMotion) {
       if (aim.active) {
         // Wind-up: squash along the pull axis.
@@ -918,7 +947,7 @@ export class Renderer {
       ctx.strokeStyle = '#bdf3ff';
       ctx.lineWidth = 2;
       ctx.globalAlpha = 0.6 + 0.4 * Math.min(1, b.shield / 20);
-      circle(ctx, b.pos.x, b.pos.y, b.radius + 6); ctx.stroke();
+      circle(ctx, orb.x, orb.y, b.radius + 6); ctx.stroke();
       ctx.globalAlpha = 1;
     }
     if (lightning) {
@@ -928,7 +957,7 @@ export class Renderer {
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * TAU + this.t * 9;
         const rr = b.radius + 5 + (Math.sin(i * 7 + this.t * 20) + 1) * 3;
-        i ? ctx.lineTo(b.pos.x + Math.cos(a) * rr, b.pos.y + Math.sin(a) * rr) : ctx.moveTo(b.pos.x + Math.cos(a) * rr, b.pos.y + Math.sin(a) * rr);
+        i ? ctx.lineTo(orb.x + Math.cos(a) * rr, orb.y + Math.sin(a) * rr) : ctx.moveTo(orb.x + Math.cos(a) * rr, orb.y + Math.sin(a) * rr);
       }
       ctx.closePath();
       ctx.stroke();
@@ -939,13 +968,13 @@ export class Renderer {
       const ang = this.t * 2.5 + (i / Math.max(1, auras.length)) * TAU;
       const rr = b.radius + 12;
       ctx.globalAlpha = 0.45 + 0.55 * Math.min(1, a.amount);
-      elementShape(ctx, a.element, b.pos.x + Math.cos(ang) * rr, b.pos.y + Math.sin(ang) * rr, 3 + 2 * Math.min(1, a.amount), def.color);
+      elementShape(ctx, a.element, orb.x + Math.cos(ang) * rr, orb.y + Math.sin(ang) * rr, 3 + 2 * Math.min(1, a.amount), def.color);
     });
     ctx.globalAlpha = 1;
     if (b.statuses.has('frozen')) {
       ctx.strokeStyle = '#bdf3ff';
       ctx.lineWidth = 3;
-      ctx.strokeRect(b.pos.x - b.radius - 3, b.pos.y - b.radius - 3, b.radius * 2 + 6, b.radius * 2 + 6);
+      ctx.strokeRect(orb.x - b.radius - 3, orb.y - b.radius - 3, b.radius * 2 + 6, b.radius * 2 + 6);
     }
   }
 
@@ -1002,7 +1031,7 @@ export class Renderer {
           ctx.beginPath(); ctx.arc(e.pos.x, e.pos.y, rr, a, a + 0.8); ctx.stroke();
         }
         ctx.globalAlpha = 1;
-        if (this.style.lens) this.drawLens(w, e, aim);
+        if (this.style.lens && !pred.hitObject) this.drawLens(w, e, pred.impactSpeed);
       }
     } else {
       const end = pred.pts[pred.pts.length - 1];
@@ -1029,10 +1058,7 @@ export class Renderer {
   }
 
   /** Reagent Lens: name the reaction the aimed shot would cause (or "?" if undiscovered). */
-  private drawLens(w: World, e: Enemy, aim: AimState): void {
-    const b = w.ball;
-    const ph = effectivePhysics(b, w.shell, w.mods);
-    const speed = PHYS.launchSpeed * ph.launchMul * aim.power;
+  private drawLens(w: World, e: Enemy, speed: number): void {
     let found: string | undefined;
     const kin = w.engine.evaluate(e, 'kinetic', speed / PHYS.impactRefSpeed, { depth: 0, impactSpeed: speed, faction: 'player' });
     if (kin.reaction) found = kin.reaction.id;

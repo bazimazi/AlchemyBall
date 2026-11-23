@@ -82,7 +82,22 @@ export const ENEMIES: EnemyDef[] = [
     projectile: { element: 'arcane', speed: 300, damage: 8, interval: 2.4, radius: 8 },
     essence: 3, threat: 2, color: '#d59bff',
   },
+  {
+    id: 'scribe', name: 'Gale Scribe', description: 'A folded wind spirit that carries sheets of charged vellum.',
+    lesson: 'Wind carries fire and poison. Borrow its element to spread a reaction through the crowd.',
+    hp: 64, radius: 22, mass: 0.8, speed: 105, ai: 'flyer', innate: { element: 'wind', amount: 0.85 },
+    armor: 0, tags: ['flying'], contactDamage: 8,
+    projectile: { element: 'wind', speed: 310, damage: 8, interval: 2.8, radius: 8 },
+    essence: 4, threat: 2, color: '#87e2b8',
+  },
   // Elites
+  {
+    id: 'inkwarden', name: 'Ink Warden', description: 'Elite. Carries poison in the seams of its bronze mask.',
+    lesson: 'Strike with fire to detonate its ink, or use wind to turn the spill against nearby foes.',
+    hp: 300, radius: 32, mass: 4, speed: 80, ai: 'chaser', innate: { element: 'poison', amount: 1.1 },
+    armor: 0.3, tags: ['elite', 'armored'], resist: { poison: 0 }, contactDamage: 15, essence: 13, threat: 7, color: '#a3d975',
+    onDeath: [{ type: 'spawnZone', zone: 'toxic_pool', radius: 82, duration: 5 }],
+  },
   {
     id: 'golem', name: 'Crystal Golem', description: 'Elite. A lumbering construct of living crystal. It adapts to repeated elements.',
     lesson: 'Brittle giants shatter. Adaptive enemies punish one-note builds — vary your elements.',
@@ -129,6 +144,12 @@ export const ENEMIES: EnemyDef[] = [
     lesson: 'Ground its charge, corrode its plating, and outlast its arcane overload.',
     hp: 2300, radius: 60, mass: 32, speed: 55, ai: 'dummy', armor: 0.6, tags: ['boss', 'armored', 'conductive'],
     contactDamage: 16, essence: 90, threat: 0, color: '#ffe84a',
+  },
+  {
+    id: 'orrery', name: 'The Eclipse Orrery', description: 'Boss. An astronomical instrument that predicts its own shadow.',
+    lesson: 'Dash between the marked lanes or save Resonance to clear projectiles within reach.',
+    hp: 2360, radius: 62, mass: 28, speed: 55, ai: 'dummy', armor: 0.46, tags: ['boss', 'arcane'],
+    contactDamage: 15, essence: 110, threat: 0, color: '#b58aef',
   },
 ];
 
@@ -192,6 +213,30 @@ export const BOSSES: Record<string, BossDef> = {
     arena: {
       objects: [{ id: 'boulder', x: 0.2, y: 0.6 }, { id: 'boulder', x: 0.8, y: 0.6 }, { id: 'brazier', x: 0.5, y: 0.72 }, { id: 'toxic_barrel', x: 0.25, y: 0.36 }, { id: 'font', x: 0.75, y: 0.36 }],
       zones: [{ id: 'water_pool', x: 0.5, y: 0.86, r: 80 }],
+    },
+  },
+  orrery: {
+    id: 'orrery',
+    name: 'The Eclipse Orrery',
+    title: 'Guardian of the Umbral Archive',
+    hp: 2360,
+    radius: 62,
+    mass: 28,
+    phases: [
+      { hpAbove: 0.68, armor: 0.46, element: 'poison', slamInterval: 7, summon: 'bloat', summonInterval: 11, flaskInterval: 6, flaskZone: 'toxic_pool',
+        nova: { interval: 5.5, count: 5, speed: 410, damage: 13, spokes: true } },
+      { hpAbove: 0.34, armor: 0.3, element: 'wind', slamInterval: 7, summon: 'scribe', summonInterval: 11, flaskInterval: 6, flaskZone: 'wind_current', chargeInterval: 8,
+        nova: { interval: 5, count: 7, speed: 425, damage: 13, spokes: true } },
+      { hpAbove: 0, armor: 0.18, element: 'arcane', slamInterval: 6, summon: 'mote', summonInterval: 9, flaskInterval: 6.4, flaskZone: 'toxic_pool',
+        nova: { interval: 4.2, count: 9, speed: 440, damage: 15, spokes: true } },
+    ],
+    essence: 110,
+    marks: 3,
+    lesson: 'Take cover between its marked firing lanes. Use Fire against Poison, or save Resonance to clear incoming shots.',
+    arena: {
+      objects: [{ id: 'brazier', x: 0.14, y: 0.55 }, { id: 'frost_crystal', x: 0.86, y: 0.55 },
+        { id: 'rune', x: 0.5, y: 0.58 }, { id: 'font', x: 0.22, y: 0.79 }, { id: 'toxic_barrel', x: 0.78, y: 0.79 }],
+      zones: [{ id: 'water_pool', x: 0.23, y: 0.68, r: 64 }],
     },
   },
 };

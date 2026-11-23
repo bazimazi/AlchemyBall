@@ -25,6 +25,7 @@ export const PHYS = {
   maxFocus: 2.5,
   brakeCooldown: 1,
   brakeFactor: 0.3,
+  pulseRadius: 182,
   /** Gravity is off in the top-down arena; kept configurable for future side-view modes. */
   gravity: 0,
   step: 1 / 120,

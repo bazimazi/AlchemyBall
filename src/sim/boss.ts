@@ -134,19 +134,8 @@ export class BossController {
       if (this.novaT <= 0) {
         const nova = p.nova;
         this.novaT = this.interval(nova.interval);
-        this.busy = 0.9;
-        const origin = e;
-        w.addTelegraph(e.pos, e.radius + 70, 0.85, 0, Content.elements.get(nova.element ?? p.element)?.color ?? '#fff', {
-          kind: 'nova', cause: 'Nova',
-          fire: () => {
-            if (origin.dead) return;
-            const offset = w.rng.next() * Math.PI * 2;
-            for (let i = 0; i < nova.count; i++) {
-              const a = offset + (i / nova.count) * Math.PI * 2;
-              w.spawnProjectile({ x: origin.pos.x + Math.cos(a) * origin.radius, y: origin.pos.y + Math.sin(a) * origin.radius }, { x: Math.cos(a) * nova.speed, y: Math.sin(a) * nova.speed }, 8, nova.damage * dmg, nova.element ?? p.element, 'hostile');
-            }
-          },
-        });
+        this.busy = nova.spokes ? 1.12 : 0.9;
+        this.castNova(nova, nova.element ?? p.element);
         w.emit({ type: 'bossAttack', kind: 'nova', pos: { ...e.pos } });
       }
     }
@@ -167,6 +156,40 @@ export class BossController {
         });
         w.emit({ type: 'bossAttack', kind: 'charge', pos: { ...e.pos } });
       }
+    }
+  }
+
+  private castNova(nova: NonNullable<BossDef['phases'][number]['nova']>, element: string): void {
+    const w = this.world;
+    const enemy = this.enemy;
+    const color = Content.elements.get(element)?.color ?? '#fff';
+    const fire = (origin: { x: number; y: number }, dir: { x: number; y: number }) => {
+      w.spawnProjectile({ x: origin.x + dir.x * enemy.radius, y: origin.y + dir.y * enemy.radius },
+        { x: dir.x * nova.speed, y: dir.y * nova.speed }, 8, nova.damage * w.diff.enemyDmg, element, 'hostile');
+    };
+    const directions = () => {
+      const offset = w.rng.next() * Math.PI * 2;
+      return Array.from({ length: nova.count }, (_, i) => {
+        const angle = offset + i / nova.count * Math.PI * 2;
+        return { x: Math.cos(angle), y: Math.sin(angle) };
+      });
+    };
+    if (!nova.spokes) {
+      w.addTelegraph(enemy.pos, enemy.radius + 70, 0.85, 0, color, {
+        kind: 'nova', cause: 'Nova',
+        fire: () => { if (!enemy.dead) for (const dir of directions()) fire(enemy.pos, dir); },
+      });
+      return;
+    }
+    const origin = { ...enemy.pos };
+    const phase = this.phase;
+    for (const dir of directions()) {
+      const toWallX = ((dir.x > 0 ? PHYS.arenaW : 0) - origin.x) / dir.x;
+      const toWallY = ((dir.y > 0 ? PHYS.arenaH : 0) - origin.y) / dir.y;
+      w.addTelegraph(origin, 22, 1.05, 0, color, {
+        kind: 'line', dir, length: Math.min(toWallX, toWallY), cause: 'Eclipse Volley',
+        fire: () => { if (!enemy.dead && this.phase === phase) fire(origin, dir); },
+      });
     }
   }
 

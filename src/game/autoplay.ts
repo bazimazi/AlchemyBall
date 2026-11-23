@@ -1,11 +1,12 @@
 import { Content } from '../content';
 import { Rng } from '../core/rng';
-import { vlen, vnorm, vsub } from '../core/vec';
+import { vdist2, vlen, vnorm, vsub } from '../core/vec';
 import { PHYS } from '../sim/ballPhysics';
 import { World } from '../sim/world';
 import { freshProfile, potencyMap, type Profile } from './profile';
 import { Run, type RoomType } from './run';
 import { ProgressionTracker } from './tracker';
+import type { TrialId } from './trials';
 
 export interface BotResult {
   won: boolean;
@@ -25,9 +26,9 @@ export interface BotResult {
  * A simple scripted player used for balance simulation and soak tests. It is deliberately
  * mediocre: launches at the nearest enemy or at a random elemental source with aim noise.
  */
-export function botRun(opts: { seed: number; core: string; profile?: Profile; maxRoomSeconds?: number; skill?: number; heat?: number; regionId?: string; mode?: 'standard' | 'endless'; maxFloors?: number }): BotResult {
+export function botRun(opts: { seed: number; core: string; profile?: Profile; maxRoomSeconds?: number; skill?: number; heat?: number; regionId?: string; mode?: 'standard' | 'endless'; maxFloors?: number; trial?: TrialId }): BotResult {
   const profile = opts.profile ?? freshProfile();
-  const run = new Run({ seed: opts.seed, mode: opts.mode ?? 'standard', regionId: opts.regionId ?? 'cinder_marsh', core: opts.core, shell: 'glass', heat: opts.heat ?? 0, tutorial: false, maxPips: 3, rerolls: 0, regionCycle: ['cinder_marsh', 'frostvein', 'storm_spire'] });
+  const run = new Run({ seed: opts.seed, mode: opts.mode ?? 'standard', regionId: opts.regionId ?? 'cinder_marsh', core: opts.core, shell: 'glass', heat: opts.heat ?? 0, tutorial: false, maxPips: 3, rerolls: 0, regionCycle: Content.lists.REGIONS.map((r) => r.id), trial: opts.trial });
   const tracker = new ProgressionTracker(profile, run, () => {});
   const rng = new Rng(opts.seed ^ 0xabc);
   const skill = opts.skill ?? 0.6;
@@ -40,7 +41,7 @@ export function botRun(opts: { seed: number; core: string; profile?: Profile; ma
     const room: RoomType = run.choices.includes('combat') ? 'combat' : run.choices[0];
     run.enter(room);
     if (room === 'rest') {
-      run.hp = Math.min(run.maxHp, run.hp + run.maxHp * 0.35);
+      run.heal(Math.round(run.maxHp * run.restHeal));
       run.completeRoom();
       continue;
     }
@@ -65,6 +66,11 @@ export function botRun(opts: { seed: number; core: string; profile?: Profile; ma
     let steps = 0;
     while (!world.over && steps < limit) {
       const b = world.ball;
+      if (world.canPulse()) {
+        const inRange = (pos: typeof b.pos) => vdist2(pos, b.pos) < PHYS.pulseRadius ** 2;
+        if (world.projectiles.some((p) => p.faction === 'hostile' && inRange(p.pos)) ||
+          world.enemies.filter((e) => !e.spawnFx && inRange(e.pos)).length >= 2) world.pulse();
+      }
       if (vlen(b.vel) < 220 && world.canLaunch()) {
         const targets = world.enemies.filter((e) => e.spawnFx <= 0);
         let tgt = targets.length ? targets.reduce((a, c) => (vlen(vsub(c.pos, b.pos)) < vlen(vsub(a.pos, b.pos)) ? c : a)).pos : { x: PHYS.arenaW / 2, y: 200 };
@@ -87,6 +93,7 @@ export function botRun(opts: { seed: number; core: string; profile?: Profile; ma
       if (!cause) cause = 'Timeout';
       return result(false);
     }
+    if (room !== 'boss') run.heal(run.roomHeal);
     const offer = run.offerUpgrades(3, room === 'elite' ? 'elite' : 'normal', () => true);
     if (offer.length) run.addUpgrade(offer[Math.floor(rng.next() * offer.length)].def.id);
     run.completeRoom();

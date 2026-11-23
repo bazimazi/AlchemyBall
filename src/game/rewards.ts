@@ -4,6 +4,7 @@ import { checkFeats, FEATS, type FeatDef } from './feats';
 import { addCoreXp, addXp, canAfford, coreRecord, nextCoreLevel, nextLevel, researchState, type Contract, type Profile } from './profile';
 import type { Run } from './run';
 import { XP } from './tracker';
+import { recordTrialWin } from './trials';
 
 export interface ProgressBar {
   label: string;
@@ -35,6 +36,8 @@ export interface RunSummary {
   newRecord: boolean;
   heat: number;
   bosses: string[];
+  newRegion?: string;
+  trial?: ReturnType<typeof recordTrialWin>;
   /** Goal-gradient bars: the nearest milestones, shown on the results screen. */
   goals: ProgressBar[];
 }
@@ -69,12 +72,16 @@ export function finishRun(p: Profile, run: Run, won: boolean, cause?: string): R
   const levelBefore = p.level;
   const xpBefore = p.xp;
   let marks = 0;
+  const ratedExpedition = run.cfg.mode === 'standard' && !run.trial;
+  const trial = won && run.trial && run.cfg.trial ? recordTrialWin(p, run.cfg.trial, run.region.id, run.cfg.core, run.cfg.heat) : undefined;
   const bosses = run.stats.bossesDefeated;
+  const newRegion = won && p.stats.bossKills[run.region.boss] === 1
+    ? Content.lists.REGIONS.find((region) => region.requiresBoss === run.region.boss)?.id : undefined;
   if (won) {
     const boss = Content.bosses[run.region.boss];
     marks = (boss?.marks ?? 1) + Math.floor(run.cfg.heat / 2);
     p.stats.wins++;
-    if (run.cfg.mode === 'standard' && run.cfg.heat > p.maxHeatWon) p.maxHeatWon = run.cfg.heat;
+    if (ratedExpedition && run.cfg.heat > p.maxHeatWon) p.maxHeatWon = run.cfg.heat;
     const trophy = `boss:${run.region.boss}:${run.cfg.core}`;
     if (!p.trophies.includes(trophy)) p.trophies.push(trophy);
   } else {
@@ -91,7 +98,7 @@ export function finishRun(p: Profile, run: Run, won: boolean, cause?: string): R
   if (cause) p.stats.deaths[cause] = (p.stats.deaths[cause] ?? 0) + 1;
   if (run.cfg.tutorial) p.tutorialDone = true;
   if (run.cfg.mode === 'daily') p.stats.dailies++;
-  let newRecord = false;
+  let newRecord = !!trial;
   if (endless && run.floor > p.endlessBest) {
     p.endlessBest = run.floor;
     newRecord = true;
@@ -101,7 +108,7 @@ export function finishRun(p: Profile, run: Run, won: boolean, cause?: string): R
   rec.runs++;
   if (won) {
     rec.wins++;
-    if (run.cfg.mode === 'standard' && run.cfg.heat > rec.bestHeat) {
+    if (ratedExpedition && run.cfg.heat > rec.bestHeat) {
       rec.bestHeat = run.cfg.heat;
       newRecord = true;
     }
@@ -119,10 +126,10 @@ export function finishRun(p: Profile, run: Run, won: boolean, cause?: string): R
     .slice(0, 4);
   return {
     won, mode: run.cfg.mode, cause, causeAdvice: won ? undefined : adviceFor(cause), floorReached,
-    essence: run.stats.essence + bonusEssence, fragments: run.stats.fragments, marks,
+    essence: run.stats.essence + bonusEssence, fragments: run.stats.fragments + (trial?.fragments ?? 0), marks,
     discoveries: run.stats.discoveries, masteryUps: run.stats.masteryUps, topReactions,
     nextGoal: nextGoal(p), bonusEssence, core: run.cfg.core, coreXp, coreLevelUps, levelUps: levelUps.filter((l) => l > levelBefore),
-    xpGained: p.xp - xpBefore, feats, contracts, newRecord, heat: run.cfg.heat, bosses, goals: goalBars(p, run.cfg.core),
+    xpGained: p.xp - xpBefore, feats, contracts, newRecord, heat: run.cfg.heat, bosses, newRegion, trial, goals: goalBars(p, run.cfg.core),
   };
 }
 

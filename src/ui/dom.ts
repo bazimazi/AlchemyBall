@@ -38,20 +38,36 @@ export function toast(root: HTMLElement, text: string, color?: string, ms = 2800
 /** In-game confirmation dialog (replaces window.confirm, which breaks immersion and focus on mobile). */
 export function confirmDialog(root: HTMLElement, title: string, text: string, ok = 'Confirm', danger = false): Promise<boolean> {
   return new Promise((resolve) => {
+    const previous = document.activeElement;
+    let closing = false;
     const close = (v: boolean) => {
+      if (closing) return;
+      closing = true;
       el.classList.add('out');
+      el.inert = true;
       setTimeout(() => el.remove(), 180);
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
       resolve(v);
     };
-    const el = h('div', { class: 'screen overlay modal-wrap', role: 'dialog', 'aria-modal': 'true' },
+    const cancel = h('button', { class: 'ghost', onclick: () => close(false) }, 'Cancel');
+    const accept = h('button', { class: danger ? 'danger' : 'primary', onclick: () => close(true) }, ok);
+    const el = h('div', { class: 'screen overlay modal-wrap', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
       h('div', { class: 'modal' },
         h('h2', null, title),
         h('p', { class: 'small dim' }, text),
-        h('div', { class: 'row' },
-          h('button', { class: 'ghost', onclick: () => close(false) }, 'Cancel'),
-          h('div', { class: 'spacer' }),
-          h('button', { class: danger ? 'danger' : 'primary', onclick: () => close(true) }, ok))));
+        h('div', { class: 'row' }, cancel, h('div', { class: 'spacer' }), accept)));
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        close(false);
+      } else if (event.key === 'Tab') {
+        event.preventDefault();
+        (document.activeElement === cancel ? accept : cancel).focus();
+      }
+    });
     root.append(el);
+    cancel.focus();
   });
 }
 

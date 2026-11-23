@@ -31,6 +31,8 @@ export type SimEvent =
   | { type: 'ballDied'; cause: string }
   | { type: 'launch'; pos: Vec2; dir: Vec2; power: number }
   | { type: 'brake'; pos: Vec2 }
+  | { type: 'resonanceReady'; pos: Vec2 }
+  | { type: 'resonancePulse'; pos: Vec2; radius: number; element: string }
   | { type: 'shoot'; pos: Vec2; element?: string }
   | { type: 'zoneSpawned'; pos: Vec2; zone: string; radius: number }
   | { type: 'waveStart'; wave: number; total: number }

@@ -199,7 +199,7 @@ export class ReactionEngine {
         w.setStatus(t, 'frozen', 2);
       }
     }
-    w.onReaction(r, holder);
+    w.onReaction(holder, faction, ctx.depth);
     w.emit({
       type: 'reaction', reactionId: r.id, pos: { ...holder.pos }, holderKind: holder.kind, holderUid: holder.uid,
       depth: ctx.depth, targets: stats.targets, kills: stats.kills, onBoss: stats.onBoss, color, radius: Math.max(stats.radius, holder.radius * 2),

@@ -5,9 +5,17 @@ import { PHYS } from '../sim/ballPhysics';
 import type { Wall } from '../sim/entities';
 import type { Difficulty, EncounterSpec } from '../sim/world';
 import { rollChallenge, type ChallengeDef } from './challenges';
+import { trialFor, type TrialId } from './trials';
 
 export type RoomType = 'combat' | 'elite' | 'rest' | 'research' | 'treasure' | 'merchant' | 'event' | 'boss' | 'tutorial_launch' | 'tutorial_react';
 export type RunMode = 'standard' | 'daily' | 'endless';
+export type UpgradeQuality = 'normal' | 'elite' | 'rare';
+
+interface PendingUpgrade {
+  quality: UpgradeQuality;
+  advance: boolean;
+  offers: { id: string; synergy?: string }[];
+}
 
 export const ROOM_INFO: Record<RoomType, { name: string; icon: string; blurb: string }> = {
   combat: { name: 'Skirmish', icon: '⚔', blurb: 'Clear the arena. Earn an upgrade.' },
@@ -69,6 +77,8 @@ export interface RunConfig {
   aspect?: string;
   /** Daily mutator id. */
   mutator?: string;
+  trial?: TrialId;
+  dailyDate?: string;
   banishes?: number;
   /** Research and feat ids unlocked when the run started (gates upgrades and room types). */
   unlocked?: string[];
@@ -96,6 +106,7 @@ export interface SavedRun {
   curse?: string;
   sinceRare: number;
   bankedEssence: number;
+  pendingUpgrade?: PendingUpgrade;
 }
 
 const FLOORS_PER_REGION = 7;
@@ -121,6 +132,7 @@ export class Run {
   sinceRare = 0;
   /** Essence already banked to the profile (app bookkeeping, persisted with the run). */
   bankedEssence = 0;
+  pendingUpgrade?: PendingUpgrade;
   stats: RunStats = {
     kills: 0, reactions: 0, discoveries: [], essence: 0, fragments: 0, maxChainDepth: 0, roomsCleared: 0, timeSec: 0, reactionCounts: {}, masteryUps: [], bossDefeated: false,
     maxCombo: 0, challenges: 0, elitesKilled: 0, bossesDefeated: [], damageTaken: 0, noHitRooms: 0, evolutions: [],
@@ -158,7 +170,7 @@ export class Run {
       v: 1, cfg: this.cfg, floor: this.floor, path: [...this.path], map: this.map.map((f) => [...f]), hp: this.hp, maxHp: this.maxHp,
       upgrades: [...this.upgrades], catalysts: this.catalysts, rerolls: this.rerolls, banishes: this.banishes, banished: [...this.banished],
       stats: JSON.parse(JSON.stringify(this.stats)), lastTemplate: this.lastTemplate, rng: [this.rng.state, this.encRng.state, this.offerRng.state],
-      curse: this.curse, sinceRare: this.sinceRare, bankedEssence: this.bankedEssence,
+      curse: this.curse, sinceRare: this.sinceRare, bankedEssence: this.bankedEssence, pendingUpgrade: this.pendingUpgrade,
     };
   }
 
@@ -181,6 +193,7 @@ export class Run {
     r.curse = d.curse;
     r.sinceRare = d.sinceRare;
     r.bankedEssence = d.bankedEssence;
+    r.pendingUpgrade = d.pendingUpgrade;
     return r;
   }
 
@@ -198,6 +211,10 @@ export class Run {
 
   get region(): RegionDef {
     return this.regionAt(Math.min(this.floor, this.map.length - 1));
+  }
+
+  get trial() {
+    return this.cfg.mode === 'standard' && !this.cfg.tutorial ? trialFor(this.cfg.trial) : undefined;
   }
 
   isUnlocked(id?: string): boolean {
@@ -247,7 +264,7 @@ export class Run {
   }
 
   enter(room: RoomType): void {
-    this.path.push(room);
+    this.path[this.floor] = room;
   }
 
   completeRoom(): void {
@@ -266,13 +283,14 @@ export class Run {
     const h = this.cfg.heat;
     const tier = this.region.tier;
     const loop = this.cfg.mode === 'endless' ? this.loop : 0;
+    const trial = this.trial;
     return {
       enemyHp: (1 + 0.1 * tier + 0.22 * loop) * (h >= 3 ? 1.15 : 1),
-      enemySpeed: (h >= 5 ? 1.15 : 1) * (1 + 0.03 * Math.min(loop, 5)),
+      enemySpeed: (h >= 5 ? 1.15 : 1) * (1 + 0.03 * Math.min(loop, 5)) * (trial && 'enemySpeed' in trial ? trial.enemySpeed : 1),
       enemyDmg: (1 + 0.1 * tier + 0.12 * loop) * (h >= 10 ? 1.25 : 1),
       bossHp: (1 + 0.2 * loop) * (h >= 8 ? 1.25 : 1),
       bossTempo: (h >= 8 ? 1.2 : 1) + 0.05 * Math.min(loop, 6),
-      pipRegen: h >= 9 ? 0.85 : 1,
+      pipRegen: (h >= 9 ? 0.85 : 1) * (trial && 'pipRegen' in trial ? trial.pipRegen : 1),
       playerResist: 0,
     };
   }
@@ -294,6 +312,7 @@ export class Run {
     const add = (m?: Record<string, number>) => { for (const [k, v] of Object.entries(m ?? {})) out[k] = (out[k] ?? 0) + v; };
     if (this.cfg.aspect) add(Content.aspects.get(this.cfg.aspect)?.mods);
     if (this.cfg.mutator) add(MUTATORS.find((m) => m.id === this.cfg.mutator)?.mods);
+    add(this.trial?.mods);
     return out;
   }
 
@@ -368,7 +387,7 @@ export class Run {
    * option so hybrid builds stay possible, guarantees a rare after 3 offers without one (pity),
    * and surfaces an Evolution whenever one is ready (always in Reliquaries and elite rewards).
    */
-  offerUpgrades(count: number, quality: 'normal' | 'elite' | 'rare', unlocked: (id?: string) => boolean = (id) => this.isUnlocked(id)): { def: UpgradeDef; synergy?: string }[] {
+  offerUpgrades(count: number, quality: UpgradeQuality, unlocked: (id?: string) => boolean = (id) => this.isUnlocked(id)): { def: UpgradeDef; synergy?: string }[] {
     const coreEl = Content.cores.get(this.cfg.core)!.element;
     const tags = this.buildTags();
     const rarityW = quality === 'rare' ? { common: 1, uncommon: 4, rare: 8, legendary: 0 } : quality === 'elite' ? { common: 4, uncommon: 6, rare: 3, legendary: 0 } : { common: 10, uncommon: 4, rare: 1, legendary: 0 };
@@ -433,6 +452,10 @@ export class Run {
   }
 
   /** Optional bonus objective for a combat room. */
+  rollUpgradeReward(quality: UpgradeQuality, advance = true): void {
+    this.pendingUpgrade = { quality, advance, offers: this.offerUpgrades(3, quality).map(({ def, synergy }) => ({ id: def.id, synergy })) };
+  }
+
   rollChallenge(room: RoomType, waves: number): ChallengeDef | undefined {
     if (room !== 'combat' && room !== 'elite') return undefined;
     return rollChallenge(this.encRng, this.regionFloor, room === 'elite', waves);

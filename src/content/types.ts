@@ -261,8 +261,8 @@ export interface BossPhaseDef {
   flaskInterval: number;
   /** Zone left by lobbed flasks (hostile). */
   flaskZone?: ZoneId;
-  /** Radial projectile burst, telegraphed by a charging ring. */
-  nova?: { interval: number; count: number; speed: number; damage: number; element?: ElementId };
+  /** Radial projectile burst. Spokes preview the individual lanes before firing. */
+  nova?: { interval: number; count: number; speed: number; damage: number; element?: ElementId; spokes?: boolean };
   /** Telegraphed dash toward the ball. */
   chargeInterval?: number;
 }

@@ -1,5 +1,15 @@
 # Design
 
+## The Observatory update
+
+The Atlas shows which bosses open the next region. The Umbral Archive unlocks after the Tempest Engine and adds four arena layouts, the Gale Scribe, the elite Ink Warden, and the Eclipse Orrery. The Orrery telegraphs individual projectile lanes across three phases that use Poison, Wind, and Arcane. A first-time region clear links directly to preparation for the next region.
+
+**Resonance** starts empty in normal encounters. A direct impact charges 12, a hit after a wall bank charges 22, and a player-initiated root reaction charges 14. At 100, Pulse clears hostile shots within 182 world units and applies the equipped core element to nearby foes. It also knocks back movable foes. Pulse reactions can chain through the normal chemistry engine. The Lab starts charged for practice.
+
+**Expedition Trials** unlock after the Crucible Warden. Ricochet rewards wall banks, Catalyst trades pip recovery for reaction damage, Pursuit trades faster foes for faster Resonance, and Glass trades integrity for faster launches and pip recovery. Each trial tracks the best clear for each core and region. Bronze, Silver, and Gold unlock at Heat 0, 3, and 7 and award 2, 3, and 5 Fragments respectively. A higher clear awards any earlier medals that are still missing. Nine medals in a trial unlock its cosmetic. Standard expeditions advance the Heat ladder.
+
+**Daily Experiment** uses a date-seeded core and mutator with a fixed starting kit, upgrade pool, and base reaction potency. The result is recorded under the expedition's UTC start date. Local accessibility settings remain available.
+
 ## Identity
 
 **Elements + Physics + Collision + Context = Emergent Gameplay.**

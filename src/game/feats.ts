@@ -62,6 +62,7 @@ export const FEATS: FeatDef[] = [
   { id: 'feat_frostvein', name: 'Into the Frostvein', category: 'Journey', description: 'Start a run in the Frostvein Caverns.', check: (p) => (p.stats.regionRuns.frostvein ?? 0) >= 1 },
   { id: 'feat_matriarch', name: 'Cold Case', category: 'Journey', description: 'Defeat the Rime Matriarch.', check: (p) => bossKills(p, 'matriarch') >= 1, reward: { essence: 80, cosmetic: 'trail_frost' } },
   { id: 'feat_tempest', name: 'Eye of the Storm', category: 'Journey', description: 'Defeat the Tempest Engine.', check: (p) => bossKills(p, 'tempest') >= 1, reward: { essence: 120, cosmetic: 'trail_storm' } },
+  { id: 'feat_orrery', name: 'Total Eclipse', category: 'Journey', description: 'Defeat the Eclipse Orrery.', check: (p) => bossKills(p, 'orrery') >= 1, reward: { fragments: 20, cosmetic: 'trail_eclipse' } },
   { id: 'feat_bosses_10', name: 'Guardian’s Bane', category: 'Journey', description: 'Defeat 10 bosses.', check: (p) => totalBossKills(p) >= 10, progress: (p) => count(totalBossKills(p), 10), reward: { marks: 1 } },
   { id: 'feat_all_cores', name: 'Pantheon', category: 'Journey', description: 'Win a run with 5 different cores.', check: (p) => coresWon(p) >= 5, progress: (p) => count(coresWon(p), 5), reward: { fragments: 50 } },
   { id: 'feat_endless_14', name: 'Abyss Walker', category: 'Journey', description: 'Reach floor 14 of the Abyssal Descent.', check: (p) => p.endlessBest >= 14, progress: (p) => count(p.endlessBest, 14), reward: { cosmetic: 'trail_void' } },

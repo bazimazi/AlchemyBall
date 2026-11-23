@@ -1,8 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import { PHYS } from '../src/sim/ballPhysics';
+import { predictShot } from '../src/render/renderer';
 import { collect, emptySpec, makeWorld } from './helpers';
 
 describe('ball physics', () => {
+  it('limits low-power previews to reachable targets', () => {
+    const w = makeWorld();
+    const enemy = w.spawnEnemy('dummy', { x: w.ball.pos.x, y: w.ball.pos.y - 290 });
+    enemy.spawnFx = 0;
+    const dir = { x: 0, y: -1 };
+    expect(predictShot(w, dir, 0.15).hitEnemy).toBeUndefined();
+    const full = predictShot(w, dir, 1);
+    expect(full.hitEnemy).toBe(enemy);
+    expect(full.impactSpeed).toBeGreaterThan(PHYS.impactMinSpeed);
+  });
+
+  it('queues one Resonance pulse, spreads the core, and clears only nearby hostile shots', () => {
+    const w = makeWorld();
+    const { x, y } = w.ball.pos;
+    const target = w.spawnEnemy('golem', { x, y: y - 85 });
+    target.spawnFx = 0;
+    const pulses = collect(w, 'resonancePulse');
+    const ready = collect(w, 'resonanceReady');
+    expect(w.pulse()).toBe(false);
+    for (let i = 0; i < 9; i++) w.onReaction(target, 'player', 0);
+    expect(ready).toHaveLength(1);
+    w.spawnProjectile({ x, y: y - 130 }, { x: 0, y: 0 }, 5, 8, 'ice', 'hostile');
+    w.spawnProjectile({ x, y: y - 230 }, { x: 0, y: 0 }, 5, 8, 'ice', 'hostile');
+    w.spawnProjectile({ x: x + 40, y: y - 100 }, { x: 0, y: 0 }, 5, 8, 'fire', 'player');
+    expect(w.pulse()).toBe(true);
+    expect(w.pulse()).toBe(false);
+    w.step();
+    expect(w.resonance).toBe(0);
+    expect(pulses).toHaveLength(1);
+    expect(target.auras.get('fire')).toBeCloseTo(0.7);
+    expect(target.vel.y).toBeLessThan(0);
+    expect(w.projectiles.map((p) => p.faction)).toEqual(['hostile', 'player']);
+  });
+
   it('never tunnels through walls at extreme speed', () => {
     const w = makeWorld({ coreElement: 'wind' });
     for (let i = 0; i < 50; i++) {
@@ -17,6 +52,15 @@ describe('ball physics', () => {
         expect(b.y).toBeLessThanOrEqual(PHYS.arenaH - w.ball.radius + 1e-6);
       }
     }
+  });
+
+  it('stays inside the wall when enemy separation pushes it outward', () => {
+    const w = makeWorld();
+    w.ball.pos = { x: w.ball.radius, y: 600 };
+    const e = w.spawnEnemy('golem', { x: w.ball.pos.x + 5, y: 600 });
+    e.spawnFx = 0;
+    w.step();
+    expect(w.ball.pos.x).toBeGreaterThanOrEqual(w.ball.radius);
   });
 
   it('launch spends a pip and pips regenerate', () => {

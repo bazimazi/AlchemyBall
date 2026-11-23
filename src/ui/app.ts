@@ -11,8 +11,9 @@ import {
   unlockedRegions, unlockedShells, type Profile,
 } from '../game/profile';
 import { finishRun, type RunSummary } from '../game/rewards';
-import { dailyKey, dailyMutator, dailySeed, labEncounter, MUTATORS, ROOM_INFO, Run, type RoomType } from '../game/run';
+import { dailyKey, dailyMutator, dailySeed, labEncounter, MUTATORS, ROOM_INFO, Run, type RoomType, type UpgradeQuality } from '../game/run';
 import type { SaveSlot } from '../game/save';
+import { MEDALS, TRIALS, TRIAL_COSMETIC_MEDALS, TRIAL_IDS, medalCount, trialMedals, trialRecordKey, trialsUnlocked, type TrialId } from '../game/trials';
 import { Fx } from '../render/fx';
 import { Renderer } from '../render/renderer';
 import { renderCodex } from './codex';
@@ -40,7 +41,6 @@ export class App {
   private saveTimer: number | null = null;
   private quality = 1;
   private frameTimes: number[] = [];
-  private menuT = 0;
 
   constructor(root: HTMLElement, canvas: HTMLCanvasElement) {
     this.root = root;
@@ -59,6 +59,7 @@ export class App {
     this.renderer.resize(this.quality);
     // Any first interaction unlocks audio (browser autoplay policy).
     window.addEventListener('pointerdown', () => this.audio.unlock(), { once: true });
+    window.addEventListener('keydown', () => this.audio.unlock(), { once: true });
     requestAnimationFrame((t) => this.loop(t));
     this.showMenu();
   }
@@ -107,7 +108,6 @@ export class App {
       this.session.frame(dt);
       this.autoQuality(dt);
     } else {
-      this.menuT += dt;
       this.audio.update(dt, 0);
     }
     requestAnimationFrame((n) => this.loop(n));
@@ -133,9 +133,26 @@ export class App {
   // ─── Screen helpers ───────────────────────────────────────────────────────
   private show(el: HTMLElement, scene?: 'menu' | 'map' | 'results'): void {
     if (!this.session) this.renderer.clear();
+    const focusWasOnScreen = this.screen?.contains(document.activeElement);
+    const focusKey = document.activeElement?.getAttribute('data-focus-key');
+    const oldScroll = this.screen?.scrollTop ?? 0;
     this.screen?.remove();
     this.screen = el;
+    if (el.classList.contains('pick-screen')) {
+      el.addEventListener('click', (event) => {
+        if (el.getAttribute('aria-busy') === 'true') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, { capture: true });
+    }
     this.root.append(el);
+    if (focusWasOnScreen) {
+      const control = focusKey ? el.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(focusKey)}"]:not(:disabled)`) : null;
+      const heading = el.querySelector<HTMLElement>('h1, h2');
+      if (control) { el.scrollTop = oldScroll; control.focus({ preventScroll: true }); }
+      else if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+    }
     if (scene) this.audio.setScene(scene, this.run?.region.id ?? this.profile.loadout.region);
   }
 
@@ -169,67 +186,80 @@ export class App {
     const prevXp = Content.masteryLevels.find((l) => l.level === p.level)?.xp ?? 0;
     const known = Object.keys(p.discovered).length;
     const total = Content.lists.REACTIONS.length;
-    const today = dailyKey(new Date());
+    const date = new Date();
+    const today = dailyKey(date);
     const hasLab = p.research.includes('res_lab');
     const hasDaily = p.research.includes('res_daily');
     const hasEndless = p.research.includes('res_endless');
     const active = p.activeRun;
     const claimable = p.contracts.filter(contractDone).length;
-    const featsReady = FEATS.length;
-    const mut = dailyMutator(dailySeed(new Date()));
-    const cta = active
-      ? h('button', { class: 'primary cta', onclick: () => (this.audio.confirm(), this.continueRun()) },
-        h('span', { class: 'cta-k' }, 'CONTINUE'), h('span', { class: 'cta-t' }, `${Content.regions.get(active.cfg.regionId)?.name ?? ''} · ${active.cfg.mode === 'endless' ? `depth ${active.floor + 1}` : `floor ${active.floor + 1}`}`))
-      : h('button', { class: 'primary cta', onclick: () => (this.audio.confirm(), p.tutorialDone ? this.showPrep() : this.startRun({ tutorial: true })) },
-        h('span', { class: 'cta-k' }, p.tutorialDone ? 'NEW EXPEDITION' : 'BEGIN'), h('span', { class: 'cta-t' }, p.tutorialDone ? 'Begin a run' : 'Your first experiment'));
-    this.show(h('div', { class: 'screen menu-screen' },
-      h('div', { class: 'wrap menu-wrap' },
-        h('div', { class: 'row menu-top' },
-          h('div', { class: 'lvl-ring', style: `--p:${nl ? ((p.xp - prevXp) / (nl.xp - prevXp)) * 100 : 100}`, title: nl ? `${p.xp - prevXp}/${nl.xp - prevXp} XP` : 'Max level' }, h('b', null, p.level)),
-          h('div', { class: 'who' }, h('b', null, this.levelTitle()), h('span', { class: 'tiny dim' }, nl ? `${nl.xp - p.xp} XP to level ${nl.level}` : 'Max level')),
-          h('div', { class: 'spacer' }), this.resBar()),
-        h('div', { class: 'menu-hero' },
-          h('div', { class: 'hero-art', 'aria-hidden': 'true' },
-            h('div', { class: 'hero-plate' }), h('div', { class: 'hero-glints' }),
-          ),
-          h('div', { class: 'title' }, h('div', { class: 'eyebrow' }, 'A PHYSICS-DRIVEN ALCHEMICAL ROGUELITE'), h('h1', null, 'Alchemy Ball'), h('div', { class: 'dim' }, 'Every collision changes the ball.')),
-        ),
-        h('div', { class: 'menu-panel' },
-          h('div', { class: 'menu-buttons' },
-            cta,
-            active ? h('button', { class: 'ghost small', onclick: async () => {
-              if (await confirmDialog(this.root, 'Abandon this run?', 'You keep your discoveries and banked Essence.', 'Abandon', true)) {
-                this.run = Run.restore(active);
-                this.endRun(false, 'Abandoned');
-              }
-            } }, 'Abandon saved run') : null,
-            h('div', { class: 'modes' },
-              hasDaily ? h('button', { class: 'mode-card', onclick: () => (this.audio.confirm(), this.startRun({ daily: true })) },
-                h('span', { class: 'mode-ic' }, '☀'), h('b', null, 'Daily Experiment'), h('span', { class: 'tiny dim' }, `${mut.name} · ${p.daily[today] ? `best ${p.daily[today].score}` : 'not yet played'}`)) : null,
-              hasEndless ? h('button', { class: 'mode-card', onclick: () => (this.audio.confirm(), this.startRun({ endless: true })) },
-                h('span', { class: 'mode-ic' }, '∞'), h('b', null, 'Abyssal Descent'), h('span', { class: 'tiny dim' }, p.endlessBest ? `deepest: floor ${p.endlessBest}` : 'endless mode')) : null,
-              hasLab ? h('button', { class: 'mode-card', onclick: () => (this.audio.select(), this.showLabSetup()) },
-                h('span', { class: 'mode-ic' }, '⚗'), h('b', null, 'Laboratory'), h('span', { class: 'tiny dim' }, 'safe sandbox')) : null,
-            ),
-            h('div', { class: 'nav-grid' },
-              h('button', { onclick: () => (this.audio.select(), this.showCodex()) }, h('span', { class: 'nav-symbol' }, '✧'), 'Codex', h('small', null, `${known}/${total}`)),
-              h('button', { onclick: () => (this.audio.select(), this.showResearch()) }, h('span', { class: 'nav-symbol' }, '⚗'), 'Research',
-                Content.lists.RESEARCH.some((n) => researchState(p, n) === 'available' && canAfford(p, n.cost)) ? h('i', { class: 'dot' }) : null),
-              h('button', { onclick: () => (this.audio.select(), this.showFeats()) }, h('span', { class: 'nav-symbol' }, '♜'), 'Feats', h('small', null, `${p.feats.length}/${featsReady}`)),
-              h('button', { onclick: () => (this.audio.select(), this.showWardrobe()) }, h('span', { class: 'nav-symbol' }, '◐'), 'Wardrobe'),
-            ),
-          ),
-          this.contractsPanel(claimable),
-          h('div', { class: 'discovery-progress' },
-            h('div', { class: 'row small' }, h('span', { class: 'dim' }, 'Reactions discovered'), h('div', { class: 'spacer' }), h('b', null, `${known} / ${total}`)),
-            h('div', { class: 'progress-track' }, h('i', { style: `width:${(known / total) * 100}%` })),
-            h('div', { class: 'row tiny dim' }, h('span', null, p.stats.runs > 0 ? `${p.stats.wins} wins · ${p.stats.runs} runs · best floor ${p.stats.bestFloor}` : 'Apprentice alchemist'), h('div', { class: 'spacer' }),
-              h('button', { class: 'ghost small', onclick: () => (this.audio.select(), this.showSettings(() => this.showMenu())) }, '⚙ Settings')),
-          ),
-        ),
-        h('div', { class: 'menu-footer' }, h('span', null, 'PULL BACK. LET GO. EXPERIMENT.'), h('span', null, `${unlockedRegions(p).length} / ${Content.lists.REGIONS.length} REGIONS`)),
-      ),
-    ), 'menu');
+    const availableResearch = Content.lists.RESEARCH.filter((n) => researchState(p, n) === 'available' && canAfford(p, n.cost)).length;
+    const regions = unlockedRegions(p);
+    const tile = (icon: string, label: string, detail: string, action: () => void, color: string) =>
+      h('button', { class: 'observatory-tile', style: `--tile-color:${color}`, onclick: () => (this.audio.select(), action()) },
+        h('span', { class: 'tile-icon', 'aria-hidden': 'true' }, icon), h('span', { class: 'tile-text' }, h('b', null, label), h('small', null, detail)),
+        h('span', { class: 'tile-arrow', 'aria-hidden': 'true' }, '↗'));
+    const activeRegion = active ? Content.regions.get(active.cfg.regionId) : undefined;
+    const start = () => {
+      this.audio.confirm();
+      if (active) this.continueRun();
+      else if (p.tutorialDone) this.showPrep();
+      else this.startRun({ tutorial: true });
+    };
+    this.show(h('main', { class: 'screen menu-screen observatory' },
+      h('div', { class: 'wrap observatory-wrap' },
+        h('header', { class: 'observatory-header' },
+          h('div', { class: 'observatory-wordmark' }, h('span', { 'aria-hidden': 'true' }, '✧'), 'The Observatory'),
+          h('div', { class: 'spacer' }), this.resBar(),
+          h('button', { class: 'observatory-settings', 'aria-label': 'Settings', title: 'Settings', onclick: () => (this.audio.select(), this.showSettings(() => this.showMenu())) }, '⚙')),
+        h('section', { class: 'observatory-hero', 'aria-labelledby': 'game-title' },
+          h('div', { class: 'observatory-copy' },
+            h('h1', { id: 'game-title' }, 'Alchemy ', h('span', null, 'Ball')),
+            h('p', null, 'Every collision changes the ball.'),
+            h('button', { class: 'primary cta', onclick: start },
+              h('span', { 'aria-hidden': 'true' }, '▶'), active ? 'Continue expedition' : p.tutorialDone ? 'New expedition' : 'Begin expedition'),
+            active ? h('div', { class: 'hero-checkpoint' }, `${activeRegion?.name ?? ''} · ${active.cfg.mode === 'endless' ? 'Depth' : 'Floor'} ${active.floor + 1}`) :
+              !p.tutorialDone ? h('div', { class: 'hero-checkpoint' }, 'Learn to launch, ricochet, and combine elements') : null)),
+        h('section', { class: 'observatory-tools', 'aria-label': 'Progress and collection' },
+          tile('✧', 'Codex', `${known} / ${total} reactions`, () => this.showCodex(), '#b0c9e9'),
+          tile('⚗', 'Research', availableResearch ? `${availableResearch} available` : 'Cores and tools', () => this.showResearch(), '#9cddd2'),
+          tile('❖', 'Trials', trialsUnlocked(p) ? `${trialMedals(p)} medals earned` : 'Unlocks at first victory', () => this.showTrials(), '#f1bc77'),
+          tile('♜', 'Feats', `${p.feats.length} / ${FEATS.length} unlocked`, () => this.showFeats(), '#e5b7c4'),
+          tile('◐', 'Wardrobe', `${p.cosmetics.owned.length} collected`, () => this.showWardrobe(), '#bcaaef')),
+        h('div', { class: 'observatory-desk' },
+          h('section', { class: 'atlas', 'aria-labelledby': 'atlas-title' },
+            h('div', { class: 'observatory-section-head' }, h('h2', { id: 'atlas-title' }, 'Expedition Atlas'), h('span', null, `${regions.length} / ${Content.lists.REGIONS.length} open`)),
+            h('div', { class: 'atlas-regions' }, ...Content.lists.REGIONS.map((r) => {
+              const open = regions.includes(r);
+              const boss = Content.bosses[r.boss];
+              const cleared = p.stats.bossKills[r.boss] > 0;
+              return h('button', { class: 'atlas-region', 'data-region': r.id, disabled: !open || !!active, style: `--region-accent:${r.palette.accent}`,
+                onclick: () => { this.audio.select(); p.loadout.region = r.id; if (p.tutorialDone) this.showPrep(); else this.startRun({ tutorial: true }); } },
+                h('span', { class: 'atlas-status' }, open ? cleared ? '✓ Cleared' : '↗ Open' : '◇ Locked'),
+                h('b', null, r.name), h('span', null, open ? boss?.name : `Defeat ${Content.bosses[r.requiresBoss!]?.name}`));
+            }))),
+          h('section', { class: 'observatory-ledger', 'aria-label': 'Alchemist progress' },
+            h('div', { class: 'observatory-section-head' }, h('h2', null, 'Your progress')),
+            h('div', { class: 'observatory-profile' },
+              h('div', { class: 'lvl-ring', style: `--p:${nl ? Math.max(0, (p.xp - prevXp) / (nl.xp - prevXp) * 100) : 100}` }, h('b', null, p.level)),
+              h('div', { class: 'who' }, h('b', null, this.levelTitle()), h('span', { class: 'tiny dim' }, nl ? `${nl.xp - p.xp} XP to level ${nl.level}` : 'Max level'))),
+            this.contractsPanel(claimable))),
+        hasDaily || hasEndless || hasLab ? h('section', { class: 'observatory-modes', 'aria-labelledby': 'modes-title' },
+          h('div', { class: 'observatory-section-head' }, h('h2', { id: 'modes-title' }, 'Other ways to play')),
+          h('div', { class: 'modes' },
+            hasDaily ? h('button', { class: 'mode-card', disabled: !!active, onclick: () => (this.audio.confirm(), this.startRun({ daily: true })) },
+              h('span', { class: 'mode-ic' }, '☀'), h('b', null, 'Daily Experiment'), h('span', { class: 'small dim' }, `${dailyMutator(dailySeed(date)).name}${p.daily[today] ? ` · Best ${p.daily[today].score}` : ''}`)) : null,
+            hasEndless ? h('button', { class: 'mode-card', disabled: !!active, onclick: () => (this.audio.confirm(), this.startRun({ endless: true })) },
+              h('span', { class: 'mode-ic' }, '∞'), h('b', null, 'Abyssal Descent'), h('span', { class: 'small dim' }, p.endlessBest ? `Best depth ${p.endlessBest}` : 'Endless expedition')) : null,
+            hasLab ? h('button', { class: 'mode-card', onclick: () => (this.audio.select(), this.showLabSetup()) },
+              h('span', { class: 'mode-ic' }, '⚗'), h('b', null, 'Laboratory'), h('span', { class: 'small dim' }, 'Practice reactions')) : null)) : null,
+        active ? h('button', { class: 'ghost observatory-abandon', onclick: async () => {
+          if (await confirmDialog(this.root, 'Abandon this run?', 'You keep your discoveries and banked Essence.', 'Abandon', true)) {
+            this.run = Run.restore(active);
+            this.endRun(false, 'Abandoned');
+          }
+        } }, 'Abandon saved expedition') : null,
+      )), 'menu');
   }
 
   private contractsPanel(claimable: number): HTMLElement {
@@ -237,7 +267,7 @@ export class App {
     const today = dailyKey(new Date());
     const canSwap = p.contractSwapDay !== today;
     return h('div', { class: 'contracts' },
-      h('div', { class: 'row' }, h('span', { class: 'eyebrow' }, 'CONTRACTS'), h('div', { class: 'spacer' }), claimable ? h('span', { class: 'pill gold' }, `${claimable} ready`) : h('span', { class: 'tiny dim' }, 'No timers. Claim when done.')),
+      h('div', { class: 'row' }, h('h3', null, 'Contracts'), h('div', { class: 'spacer' }), claimable ? h('span', { class: 'pill gold' }, `${claimable} ready`) : null),
       ...p.contracts.map((c) => {
         const done = contractDone(c);
         const reward = [c.reward.essence && `◆${c.reward.essence}`, c.reward.fragments && `✦${c.reward.fragments}`].filter(Boolean).join(' ');
@@ -255,6 +285,42 @@ export class App {
   }
 
   // ─── Run preparation ──────────────────────────────────────────────────────
+  showTrials(initial: TrialId = this.profile.loadout.trial ?? 'ricochet'): void {
+    const p = this.profile;
+    const open = trialsUnlocked(p);
+    const selected = TRIALS[initial];
+    const total = trialMedals(p, initial);
+    this.show(h('div', { class: 'screen trials-screen' }, h('div', { class: 'wrap' },
+      h('div', { class: 'row' }, this.back(() => this.showMenu()), h('div', { class: 'spacer' }), this.resBar()),
+      h('header', { class: 'trial-heading' },
+        h('h2', null, 'Expedition Trials'),
+        h('p', { class: 'dim' }, open ? 'Choose a rule, then defeat a region boss to earn medals with your chosen core.' : 'Defeat the Crucible Warden to unlock all four trials.')),
+      h('div', { class: 'trial-tabs', 'aria-label': 'Trial' }, ...TRIAL_IDS.map((id) =>
+        h('button', { class: 'trial-tab', style: `--trial:${TRIALS[id].color}`, 'data-focus-key': `trial-page-${id}`, 'aria-pressed': String(id === initial),
+          onclick: () => { this.audio.select(); this.showTrials(id); } },
+        h('span', { 'aria-hidden': 'true' }, TRIALS[id].icon), h('b', null, TRIALS[id].name)))),
+      h('section', { class: 'card trial-summary', style: `--trial:${selected.color}` },
+        h('h3', null, selected.name), h('p', null, selected.rule),
+        h('div', { class: 'trial-medals' }, ...MEDALS.map((medal) =>
+          h('div', null, h('b', null, medal.name), h('span', null, `Heat ${medal.heat}+ · +${medal.fragments} Fragments`)))),
+        h('div', { class: 'row small' }, h('span', null, Content.cosmetics.get(selected.cosmetic)?.name), h('div', { class: 'spacer' }),
+          h('b', null, p.cosmetics.owned.includes(selected.cosmetic) ? 'Unlocked' : `${total} / ${TRIAL_COSMETIC_MEDALS} medals`)),
+        this.bar(total, TRIAL_COSMETIC_MEDALS, 'gold')),
+      open ? h('div', { class: 'trial-records' }, ...Content.lists.REGIONS.map((region) =>
+        h('section', { class: 'card trial-region', 'data-region': region.id },
+          h('h3', null, region.name),
+          h('ul', null, ...Content.lists.CORES.map((core) => {
+            const best = p.trialRecords[trialRecordKey(initial, region.id, core.id)];
+            const medals = medalCount(best);
+            return h('li', null, core.name, h('span', { class: medals ? 'gold' : 'dim' },
+              best === undefined ? '—' : `${MEDALS[medals - 1]?.name} · Heat ${best}`));
+          }))))) : null,
+      open ? h('button', { class: 'primary sticky-cta', disabled: !!p.activeRun, onclick: () => {
+        p.loadout.trial = initial; this.audio.confirm(); this.showPrep();
+      } }, p.activeRun ? 'Finish your saved expedition first' : `Prepare ${selected.name} expedition`) : null,
+    )), 'menu');
+  }
+
   showPrep(): void {
     const p = this.profile;
     const cores = unlockedCores(p);
@@ -272,7 +338,8 @@ export class App {
         const req = r.requiresBoss ? Content.bosses[r.requiresBoss]?.name : '';
         return h('button', {
           class: `region-card${p.loadout.region === r.id ? ' selected' : ''}${open ? '' : ' locked'}`, 'data-region': r.id, style: `--a:${r.palette.accent};--l:${r.palette.light}`,
-          onclick: () => { if (open) { p.loadout.region = r.id; this.audio.select(); this.audio.setScene('menu', r.id); render(); } else this.audio.denied(); },
+          'data-focus-key': `region-${r.id}`, 'aria-pressed': String(p.loadout.region === r.id), disabled: !open,
+          onclick: () => { p.loadout.region = r.id; this.audio.select(); this.audio.setScene('menu', r.id); render(); },
         }, h('b', null, r.name), h('span', { class: 'tiny' }, open ? r.flavor : `Defeat ${req} to unlock`), h('span', { class: 'tiny dim' }, open ? `Boss: ${Content.bosses[r.boss]?.name}` : '🔒'));
       });
       const coreCards = Content.lists.CORES.map((c) => {
@@ -280,9 +347,10 @@ export class App {
         const el = Content.elements.get(c.element)!;
         const req = c.unlock ? Content.research.get(c.unlock)?.name : '';
         const rec = p.cores[c.id];
-        return h('div', {
+        return h('button', {
           class: `card selectable core-card${p.loadout.core === c.id ? ' selected' : ''}${unlocked ? '' : ' locked'}`, style: `--c:${el.color}`,
-          onclick: () => { if (unlocked) { p.loadout.core = c.id; this.audio.select(); render(); } else this.audio.denied(); },
+          'data-focus-key': `core-${c.id}`, 'aria-pressed': String(p.loadout.core === c.id), disabled: !unlocked,
+          onclick: () => { p.loadout.core = c.id; this.audio.select(); render(); },
         },
           h('div', { class: 'row' }, h('span', { class: 'core-glyph' }, el.glyph), h('b', null, c.name), h('div', { class: 'spacer' }), rec ? h('span', { class: 'pill tiny' }, `Lv ${rec.level}`) : null),
           h('div', { class: 'tiny', style: `color:${el.color}` }, c.archetype + (rec && rec.bestHeat >= 0 ? ` · 🔥${rec.bestHeat}` : '')),
@@ -294,13 +362,14 @@ export class App {
       const aspectRow = h('div', null, h('h3', null, 'Aspect'), h('div', { class: 'tiny dim' }, `Core level ${crec.level}. Aspects are alternative forms of the ${core.name}, unlocked by playing it.`),
         h('div', { class: 'aspect-row' }, ...aspects.map((a) => {
           const open = crec.level >= a.level;
-          return h('div', {
+          return h('button', {
             class: `card selectable small aspect${curAspect === a.id ? ' selected' : ''}${open ? '' : ' locked'}`,
-            onclick: () => { if (open) { p.loadout.aspects[core.id] = a.id; this.audio.select(); render(); } else this.audio.denied(); },
+            'data-focus-key': `aspect-${a.id}`, 'aria-pressed': String(curAspect === a.id), disabled: !open,
+            onclick: () => { p.loadout.aspects[core.id] = a.id; this.audio.select(); render(); },
           }, h('b', null, a.name), h('div', { class: 'tiny dim' }, open ? a.description : `Reach core level ${a.level}`));
         })));
       const shellRow = shells.length > 1 ? h('div', null, h('h3', null, 'Shell'), h('div', { class: 'grid2', style: 'margin-top:6px' },
-        ...shells.map((s) => h('div', { class: `card selectable small${p.loadout.shell === s.id ? ' selected' : ''}`, onclick: () => { p.loadout.shell = s.id; this.audio.select(); render(); } }, h('b', null, s.name), h('div', { class: 'tiny dim' }, s.description))))) : null;
+        ...shells.map((s) => h('button', { class: `card selectable small${p.loadout.shell === s.id ? ' selected' : ''}`, 'data-focus-key': `shell-${s.id}`, 'aria-pressed': String(p.loadout.shell === s.id), onclick: () => { p.loadout.shell = s.id; this.audio.select(); render(); } }, h('b', null, s.name), h('div', { class: 'tiny dim' }, s.description))))) : null;
       const socketRow = socketUnlocked ? h('div', null, h('h3', null, 'Catalyst Socket'), h('div', { class: 'tiny dim' }, 'Start with one common upgrade.'),
         h('div', { class: 'row wrap-row', style: 'margin-top:6px' },
           h('button', { class: `small${!p.loadout.socket ? ' primary' : ''}`, onclick: () => { p.loadout.socket = undefined; render(); } }, 'None'),
@@ -308,11 +377,23 @@ export class App {
       const maxHeat = Math.min(MAX_HEAT, p.maxHeatWon + 1);
       const heatRow = heatUnlocked ? h('div', { class: 'card heat-card' },
         h('div', { class: 'row' }, h('b', null, `Heat ${p.heat}`), h('span', { class: 'tiny dim' }, `best with this core: ${crec.bestHeat >= 0 ? crec.bestHeat : '—'}`), h('div', { class: 'spacer' }),
-          h('button', { class: 'small', disabled: p.heat <= 0, onclick: () => { p.heat--; this.audio.select(); render(); } }, '−'),
-          h('button', { class: 'small', disabled: p.heat >= maxHeat, onclick: () => { p.heat++; this.audio.select(); render(); } }, '+')),
+          h('button', { class: 'small', 'data-focus-key': 'heat-down', 'aria-label': 'Lower Heat', disabled: p.heat <= 0, onclick: () => { p.heat--; this.audio.select(); render(); } }, '−'),
+          h('button', { class: 'small', 'data-focus-key': 'heat-up', 'aria-label': 'Raise Heat', disabled: p.heat >= maxHeat, onclick: () => { p.heat++; this.audio.select(); render(); } }, '+')),
         h('div', { class: 'heat-ladder' }, ...Content.heatLevels.map((l) => h('div', { class: `heat-rung${l.level <= p.heat ? ' on' : ''}${l.level > maxHeat ? ' locked' : ''}` }, h('b', null, l.level), h('span', null, `${l.name} — ${l.description}`)))),
         h('div', { class: 'tiny dim' }, p.heat ? `+${p.heat * 15}% Essence · +${Math.floor(p.heat / 2)} Mastery Marks on victory.` : 'Win a run to raise the Heat further.')) : null;
       const region = Content.regions.get(p.loadout.region)!;
+      const trial = p.loadout.trial;
+      const selectTrial = (id?: TrialId) => { p.loadout.trial = id; this.audio.select(); render(); };
+      const trialRow = trialsUnlocked(p) ? h('section', { class: 'card trial-picker' },
+        h('h3', null, 'Expedition rule'),
+        h('div', { class: 'row wrap-row' }, ...[undefined, ...TRIAL_IDS].map((id) =>
+          h('button', { class: 'small', 'data-focus-key': `prep-trial-${id ?? 'standard'}`, 'aria-pressed': String(id === trial), onclick: () => selectTrial(id) }, id ? TRIALS[id].name : 'Standard'))),
+        h('div', { class: 'small dim' }, trial ? TRIALS[trial].rule : 'Win a standard expedition at your highest available Heat to unlock the next level.'),
+        trial ? h('div', { class: 'small gold' }, (() => {
+          const medals = medalCount(p.trialRecords[trialRecordKey(trial, region.id, core.id)]);
+          const next = MEDALS[medals];
+          return next ? `Next medal with this core and region · ${next.name} at Heat ${next.heat}` : 'All three medals earned with this core and region';
+        })()) : null) : null;
       this.show(h('div', { class: 'screen prep-screen', style: `--a:${region.palette.accent}` }, h('div', { class: 'wrap' },
         h('div', { class: 'row' }, this.back(() => this.showMenu()), h('div', { class: 'spacer' }), this.resBar()),
         h('h2', { class: 'prep-heading', 'data-region': region.id }, 'Prepare your expedition'),
@@ -321,8 +402,10 @@ export class App {
         h('div', { class: 'small dim' }, 'Your core is the element your ball always carries. Pick up others from the arena.'),
         h('div', { class: 'grid2' }, ...coreCards),
         aspects.length > 1 ? aspectRow : null,
-        shellRow, socketRow, heatRow,
-        h('button', { class: 'primary sticky-cta', onclick: () => (this.audio.confirm(), this.save(), this.startRun({})) }, `Enter ${region.name}`),
+        shellRow, socketRow, trialRow, heatRow,
+        h('div', { class: 'prep-footer sticky-cta' },
+          h('span', { class: 'small dim' }, `${core.name} · ${trial && trialsUnlocked(p) ? TRIALS[trial].name : 'Standard'}${heatUnlocked ? ` · Heat ${p.heat}` : ''}`),
+          h('button', { class: 'primary', onclick: () => (this.audio.confirm(), this.startRun({})) }, `Enter ${region.name}`)),
       )));
     };
     render();
@@ -330,6 +413,7 @@ export class App {
 
   startRun(o: { tutorial?: boolean; daily?: boolean; endless?: boolean }): void {
     const p = this.profile;
+    if (p.activeRun) return this.continueRun();
     const today = new Date();
     let core = o.tutorial ? 'ember' : p.loadout.core;
     let seed = (Date.now() ^ hashString(String(Math.random()))) >>> 0;
@@ -346,11 +430,13 @@ export class App {
     const regionCycle = o.endless ? unlockedRegions(p).map((r) => r.id) : undefined;
     this.run = new Run({
       seed, mode: o.daily ? 'daily' : o.endless ? 'endless' : 'standard', regionId: region, core, shell: o.daily || o.tutorial ? 'glass' : p.loadout.shell,
-      heat: o.daily ? 1 : o.tutorial || o.endless ? 0 : p.heat, tutorial: !!o.tutorial, maxPips: 3 + (p.research.includes('res_pip') ? 1 : 0),
-      rerolls: (p.research.includes('res_reroll') ? 1 : 0) + (p.research.includes('res_reroll2') ? 1 : 0) + (coreLv >= 5 && !o.daily ? 1 : 0),
-      banishes: p.research.includes('res_banish') ? 2 : 0, socket: o.daily || o.tutorial ? undefined : p.loadout.socket,
+      heat: o.daily ? 1 : o.tutorial || o.endless ? 0 : p.heat, tutorial: !!o.tutorial, maxPips: 3 + (!o.daily && p.research.includes('res_pip') ? 1 : 0),
+      rerolls: o.daily ? 1 : Number(p.research.includes('res_reroll')) + Number(p.research.includes('res_reroll2')) + Number(coreLv >= 5),
+      banishes: o.daily ? 1 : p.research.includes('res_banish') ? 2 : 0, socket: o.daily || o.tutorial ? undefined : p.loadout.socket,
       aspect: aspect && Content.aspects.get(aspect)?.core === core && coreLv >= (Content.aspects.get(aspect)?.level ?? 99) ? aspect : undefined,
-      mutator, unlocked: unlockedIds(p), regionCycle,
+      mutator, unlocked: o.daily ? Content.lists.RESEARCH.map((n) => n.id).concat(FEATS.map((f) => f.id)) : unlockedIds(p), regionCycle,
+      dailyDate: o.daily ? dailyKey(today) : undefined,
+      trial: !o.tutorial && !o.daily && !o.endless && trialsUnlocked(p) ? p.loadout.trial : undefined,
     });
     p.stats.regionRuns[region] = (p.stats.regionRuns[region] ?? 0) + 1;
     checkFeats(p);
@@ -371,6 +457,7 @@ export class App {
       this.save();
       return this.showMenu();
     }
+    if (this.run.pendingUpgrade) return this.showUpgradePick(this.run.pendingUpgrade.quality);
     this.showMap();
   }
 
@@ -388,10 +475,12 @@ export class App {
         h('span', { class: 'map-floor' }, run.cfg.mode === 'endless' ? i + 1 : k + 1),
         ...choices.map((room) => {
           const taken = state === 'done' && run.path[i] === room;
+          const info = ROOM_INFO[room];
           return h('button', {
-            class: `map-node r-${room}${taken ? ' taken' : ''}`, disabled: state !== 'here', title: `${ROOM_INFO[room].name} — ${ROOM_INFO[room].blurb}`,
+            class: `map-node r-${room}${taken ? ' taken' : ''}`, disabled: state !== 'here', title: `${info.name} · ${info.blurb}`,
             onclick: () => (this.audio.confirm(), this.enterRoom(room)),
-          }, h('span', { class: 'ic' }, ROOM_INFO[room].icon), state === 'here' ? h('span', { class: 'lbl' }, ROOM_INFO[room].name) : null);
+          }, h('span', { class: 'ic', 'aria-hidden': 'true' }, info.icon),
+          state === 'here' ? h('span', { class: 'map-node-copy' }, h('b', null, info.name), h('small', null, info.blurb)) : null);
         }));
     }).reverse();
     const core = Content.cores.get(run.cfg.core)!;
@@ -404,19 +493,23 @@ export class App {
       h('div', { class: 'row map-heading', 'data-region': region.id },
         h('div', null, h('div', { class: 'eyebrow' }, run.cfg.mode === 'endless' ? `ABYSSAL DESCENT · LOOP ${run.loop + 1}` : run.cfg.mode === 'daily' ? 'DAILY EXPERIMENT' : run.cfg.heat ? `HEAT ${run.cfg.heat}` : 'EXPEDITION'), h('h2', { class: 'region-title' }, region.name)),
         h('div', { class: 'spacer' }),
-        h('button', { class: 'ghost small', onclick: () => (this.audio.select(), this.showPauseMenuFromMap()) }, '☰')),
-      h('div', { class: 'tiny dim' }, region.flavor + (mut ? ` · Mutator: ${mut.name}` : '')),
+        h('button', { class: 'ghost map-menu', 'aria-label': 'Expedition menu', onclick: () => (this.audio.select(), this.showPauseMenuFromMap()) }, '☰')),
       h('div', { class: 'build-strip' },
         h('div', { class: 'hp-strip' }, h('i', { style: `width:${hpFrac * 100}%` }), h('span', null, `❤ ${Math.ceil(run.hp)} / ${run.maxHp}`)),
         h('span', { class: 'pill cata' }, `⬡ ${run.catalysts}`),
         run.rerolls ? h('span', { class: 'pill' }, `⟳ ${run.rerolls}`) : null,
         run.banishes ? h('span', { class: 'pill' }, `✕ ${run.banishes}`) : null),
-      h('div', { class: 'map' }, ...rows),
-      h('div', { class: 'card small build' },
-        h('div', null, h('b', null, core.name), h('span', { class: 'dim' }, ` · ${aspect ? aspect.name : core.archetype}`)),
-        ups.length ? h('div', { class: 'up-chips' }, ...ups.map((u) => h('span', { class: `up-chip rar-${u.rarity}`, title: `${u.name}: ${u.description}` }, h('i', null, u.icon ?? '•'), `${u.name}${(run.upgrades.get(u.id) ?? 0) > 1 ? ` ×${run.upgrades.get(u.id)}` : ''}`))) : h('div', { class: 'tiny dim' }, 'No upgrades yet.'),
-        evo.length ? h('div', { class: 'syn', style: 'margin-top:6px' }, `✦ Evolution ready: ${evo.map((e) => e.name).join(', ')} — look for it in Reliquaries and elite rewards.`) : null,
-      ),
+      h('div', { class: 'map-grid' },
+        h('section', { class: 'card route-card' },
+          h('div', { class: 'row' }, h('h3', null, 'Expedition route'), h('div', { class: 'spacer' }), h('span', { class: 'tiny gold' }, run.cfg.mode === 'endless' ? `Depth ${run.floor + 1}` : `Floor ${run.floor + 1} / ${run.map.length}`)),
+          h('div', { class: 'map' }, ...rows)),
+        h('aside', { class: 'map-sidebar' },
+          run.trial || mut ? h('div', { class: 'card map-rule small' }, h('b', null, run.trial?.name ?? mut?.name), h('span', { class: 'dim' }, run.trial?.rule ?? mut?.description)) : null,
+          h('section', { class: 'card small build' },
+            h('h3', null, 'Current build'),
+            h('div', null, h('b', null, core.name), h('span', { class: 'dim' }, ` · ${aspect ? aspect.name : core.archetype}`)),
+            ups.length ? h('div', { class: 'up-chips' }, ...ups.map((u) => h('span', { class: `up-chip rar-${u.rarity}`, title: `${u.name}: ${u.description}` }, h('i', null, u.icon ?? '•'), `${u.name}${(run.upgrades.get(u.id) ?? 0) > 1 ? ` ×${run.upgrades.get(u.id)}` : ''}`))) : h('div', { class: 'tiny dim' }, 'No upgrades yet.'),
+            evo.length ? h('div', { class: 'syn' }, `✦ Evolution ready: ${evo.map((e) => e.name).join(', ')}. Look for it in Reliquaries and elite rewards.`) : null))),
     )), 'map');
   }
 
@@ -474,14 +567,12 @@ export class App {
       if (run.cfg.mode === 'endless') {
         run.heal(Math.round(run.maxHp * 0.4));
         toast(this.root, `Loop ${run.loop} complete — the descent continues, and grows harder.`, '#c9a6ff', 3600, '∞');
-        this.save();
-        return this.showUpgradePick('rare');
+        return this.showUpgradePick('rare', false);
       }
       return this.endRun(true);
     }
     run.heal(run.roomHeal);
     run.catalysts += room === 'elite' ? 2 : 1;
-    this.save();
     this.showUpgradePick(room === 'elite' ? 'elite' : 'normal');
   }
 
@@ -495,7 +586,6 @@ export class App {
     const delta = run.stats.essence - run.bankedEssence;
     if (delta > 0) this.profile.essence += delta;
     run.bankedEssence = run.stats.essence;
-    this.save();
   }
 
   // ─── Rooms without combat ─────────────────────────────────────────────────
@@ -504,15 +594,19 @@ export class App {
     const stacks = run.upgrades.get(o.def.id) ?? 0;
     const els = o.def.elements.map((e) => Content.elements.get(e)!);
     const req = o.def.requires?.map((id) => Content.upgrades.get(id)?.name).join(' + ');
-    let picked = false;
     const card = h('div', {
       class: `card selectable offer rar-${o.def.rarity}`, style: `--i:${i}`, tabindex: '0', role: 'button',
       onclick: () => {
-        if (picked) return;
-        picked = true;
+        const screen = card.closest('.pick-screen');
+        if (!screen) return;
+        screen.setAttribute('aria-busy', 'true');
         card.classList.add('chosen');
         o.def.rarity === 'legendary' ? this.audio.evolution() : this.audio.confirm();
-        setTimeout(onPick, this.fx.reducedMotion ? 0 : 260);
+        setTimeout(() => {
+          if (!card.isConnected) return;
+          screen.removeAttribute('aria-busy');
+          onPick();
+        }, this.fx.reducedMotion ? 0 : 260);
       },
     },
       h('div', { class: 'offer-art' }, h('span', null, o.def.icon ?? '✦')),
@@ -526,15 +620,32 @@ export class App {
         extra ?? null,
       ),
     );
+    card.addEventListener('keydown', (event) => {
+      if (event.target === card && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        if (!event.repeat) card.click();
+      }
+    });
     setTimeout(() => this.audio.cardDeal(i), 80 * i);
     return card;
   }
 
-  showUpgradePick(quality: 'normal' | 'elite' | 'rare', after?: () => void): void {
+  showUpgradePick(quality: UpgradeQuality, advance = true): void {
     const run = this.run!;
-    let offers = run.offerUpgrades(3, quality);
-    const done = after ?? (() => this.afterRoom());
+    if (!run.pendingUpgrade) run.rollUpgradeReward(quality, advance);
+    const done = () => {
+      const advanceFloor = run.pendingUpgrade?.advance;
+      run.pendingUpgrade = undefined;
+      if (advanceFloor) this.afterRoom();
+      else this.showMap();
+    };
     const render = () => {
+      this.save();
+      const reward = run.pendingUpgrade!;
+      const offers = reward.offers.flatMap(({ id, synergy }) => {
+        const def = Content.upgrades.get(id);
+        return def ? [{ def, synergy }] : [];
+      });
       const cards = offers.map((o, i) => this.upgradeCard(o, i, () => {
         run.addUpgrade(o.def.id);
         if (!this.profile.seenUpgrades.includes(o.def.id)) this.profile.seenUpgrades.push(o.def.id);
@@ -548,7 +659,7 @@ export class App {
         e.stopPropagation();
         if (run.banish(o.def.id)) {
           this.audio.back();
-          offers = run.offerUpgrades(3, quality);
+          run.rollUpgradeReward(reward.quality, reward.advance);
           render();
         }
       } }, `✕ Banish (${run.banishes})`) : null));
@@ -561,7 +672,7 @@ export class App {
             if (run.rerolls > 0) run.rerolls--;
             else run.catalysts--;
             this.audio.cardFlip();
-            offers = run.offerUpgrades(3, quality);
+            run.rollUpgradeReward(reward.quality, reward.advance);
             render();
           } }, run.rerolls > 0 ? `⟳ Reroll (free ×${run.rerolls})` : '⟳ Reroll (1 ⬡)'),
           h('div', { class: 'spacer' }),
@@ -584,9 +695,9 @@ export class App {
     this.show(h('div', { class: 'screen' }, h('div', { class: 'wrap' },
       h('div', { class: 'room-hero' }, h('span', null, '♨')),
       h('h2', null, 'Still Spring'), h('div', { class: 'dim small' }, 'Warm water hums with residual alchemy. Choose one.'),
-      h('div', { class: 'card selectable choice', onclick: () => { this.audio.confirm(); run.heal(heal); this.afterRoom(); } }, h('b', null, `Rest: heal ${heal} HP`), h('div', { class: 'small dim' }, `❤ ${Math.ceil(run.hp)}/${run.maxHp}`)),
-      h('div', { class: 'card selectable choice', onclick: () => { this.audio.confirm(); run.maxHp += 12; run.hp += 12; this.afterRoom(); } }, h('b', null, 'Temper: +12 max HP'), h('div', { class: 'small dim' }, 'A sturdier shell for the rest of the run.')),
-      h('div', { class: `card selectable choice${run.catalysts < 3 ? ' locked' : ''}`, onclick: () => { if (run.catalysts >= 3) { run.catalysts -= 3; this.audio.purchase(); this.showUpgradePick('rare'); } else this.audio.denied(); } },
+      h('button', { class: 'card selectable choice', onclick: () => { this.audio.confirm(); run.heal(heal); this.afterRoom(); } }, h('b', null, `Rest · Heal ${heal} HP`), h('div', { class: 'small dim' }, `❤ ${Math.ceil(run.hp)}/${run.maxHp}`)),
+      h('button', { class: 'card selectable choice', onclick: () => { this.audio.confirm(); run.maxHp += 12; run.hp += 12; this.afterRoom(); } }, h('b', null, 'Temper · +12 max HP'), h('div', { class: 'small dim' }, 'A sturdier shell for the rest of the run.')),
+      h('button', { class: 'card selectable choice', disabled: run.catalysts < 3, onclick: () => { run.catalysts -= 3; this.audio.purchase(); this.showUpgradePick('rare'); } },
         h('b', null, 'Distill: 3 ⬡ → rare upgrade choice'), h('div', { class: 'small dim' }, `You have ${run.catalysts} Catalysts.`)),
     )), 'map');
   }
@@ -616,8 +727,7 @@ export class App {
         h('div', { class: 'row' }, h('h2', null, 'Wandering Merchant'), h('div', { class: 'spacer' }), h('span', { class: 'pill cata' }, `⬡ ${run.catalysts}`)),
         h('div', { class: 'small dim' }, '“Catalysts only, friend. Everything else is too unstable to carry.”'),
         h('div', { class: 'offers' }, ...cards),
-        h('div', { class: `card selectable choice${healed || run.catalysts < 2 ? ' locked' : ''}`, onclick: () => {
-          if (healed || run.catalysts < 2) return this.audio.denied();
+        h('button', { class: 'card selectable choice', disabled: healed || run.catalysts < 2, onclick: () => {
           run.catalysts -= 2; healed = true; run.heal(Math.round(run.maxHp * 0.3)); this.audio.purchase(); render();
         } }, h('b', null, `Remedy: heal 30% HP for 2 ⬡`), h('div', { class: 'small dim' }, `❤ ${Math.ceil(run.hp)}/${run.maxHp}`)),
         h('button', { class: 'primary', onclick: () => (this.audio.confirm(), this.afterRoom()) }, 'Leave'),
@@ -636,15 +746,17 @@ export class App {
       h('div', { class: 'eyebrow' }, 'ANOMALY'),
       h('h2', null, ev.name),
       h('p', { class: 'lore' }, ev.text),
-      ...choices.map((c) => h('div', { class: 'card selectable choice', onclick: () => {
+      ...choices.map((c) => h('button', { class: 'card selectable choice', onclick: () => {
         this.audio.confirm();
         const out = c.apply(run, p);
+        if (out.offer) run.rollUpgradeReward(out.offer);
+        else run.completeRoom();
         this.save();
         this.show(h('div', { class: 'screen' }, h('div', { class: 'wrap anomaly' },
           h('div', { class: 'room-hero violet' }, h('span', null, ev.icon)),
           h('h2', null, ev.name),
           h('p', { class: 'lore' }, out.text),
-          h('button', { class: 'primary', onclick: () => (this.audio.confirm(), out.offer ? this.showUpgradePick(out.offer) : this.afterRoom()) }, out.offer ? 'Choose' : 'Continue'),
+          h('button', { class: 'primary', onclick: () => (this.audio.confirm(), out.offer ? this.showUpgradePick(out.offer) : this.showMap()) }, out.offer ? 'Choose' : 'Continue'),
         )), 'map');
       } }, h('b', null, c.label), h('div', { class: 'small dim' }, c.detail))),
     )), 'map');
@@ -658,6 +770,7 @@ export class App {
     if (pick) p.revealed.push(pick.id);
     p.fragments += 4;
     run.stats.fragments += 4;
+    run.completeRoom();
     this.save();
     const ins = pick ? pick.inputs.map((x) => (x === '*' ? 'any element' : Content.elements.get(x)!.name)) : [];
     this.show(h('div', { class: 'screen' }, h('div', { class: 'wrap' },
@@ -668,7 +781,7 @@ export class App {
         pick ? h('div', null, h('div', { class: 'small dim' }, 'A scorched notebook describes an experiment:'), h('p', { class: 'lore' }, `“${pick.hint}”`),
           h('div', { class: 'small' }, `It involves ${ins.join(' and ')}.`), h('div', { class: 'tiny dim' }, 'The hint is now in your Codex.')) : h('p', null, 'Nothing new to learn here — you have seen it all.'),
       ),
-      h('button', { class: 'primary', onclick: () => (this.audio.confirm(), this.afterRoom()) }, 'Continue'),
+      h('button', { class: 'primary', onclick: () => (this.audio.confirm(), this.showMap()) }, 'Continue'),
     )), 'map');
   }
 
@@ -682,7 +795,7 @@ export class App {
     this.profile.activeRun = undefined;
     const summary = finishRun(this.profile, run, won, cause);
     if (run.cfg.mode === 'daily') {
-      const key = dailyKey(new Date());
+      const key = run.cfg.dailyDate ?? dailyKey(new Date());
       const score = run.stats.kills * 10 + run.stats.reactions * 2 + (won ? 500 : 0) + run.floor * 50 + run.stats.maxCombo * 5;
       const prev = this.profile.daily[key];
       if (!prev || score > prev.score) this.profile.daily[key] = { score, won };
@@ -696,13 +809,14 @@ export class App {
   private showResults(s: RunSummary, run: Run): void {
     const disc = s.discoveries.map((id) => Content.reactions.get(id)!).filter(Boolean);
     const endless = s.mode === 'endless';
-    const title = endless ? `Depth ${s.floorReached}` : s.won ? 'Victory' : 'The ball shattered';
+    const title = s.cause === 'Abandoned' ? 'Expedition ended' : endless ? `Depth ${s.floorReached}` : s.won ? 'Victory' : 'The ball shattered';
     const statEl = (label: string, v: number, prefix = '') => {
       const b = h('b', null, '0');
       setTimeout(() => countUp(b, v, 650, prefix, (i) => this.audio.tick(i)), 250);
       return h('div', null, label, b);
     };
     const coreName = Content.cores.get(s.core)?.name ?? s.core;
+    const opened = s.newRegion ? Content.regions.get(s.newRegion) : undefined;
     if (s.won) this.audio.victory();
     const bars = s.goals.map((g) => {
       const fill = h('i', { style: 'width:0%' });
@@ -714,6 +828,9 @@ export class App {
         h('div', { class: 'eyebrow' }, endless ? 'ABYSSAL DESCENT' : s.mode === 'daily' ? 'DAILY EXPERIMENT' : run.region.name.toUpperCase()),
         h('h1', null, title),
         s.newRecord ? h('div', { class: 'pill gold' }, '★ New record') : null),
+      opened ? h('button', { class: 'atlas-region result-region', 'data-region': opened.id, style: `--region-accent:${opened.palette.accent}`, onclick: () => {
+        this.profile.loadout.region = opened.id; this.audio.confirm(); this.showPrep();
+      } }, h('span', { class: 'atlas-status' }, '✓ Region unlocked'), h('b', null, opened.name), h('span', null, 'Prepare an expedition ↗')) : null,
       !s.won && s.cause ? h('div', { class: 'card' }, h('b', null, `Cause: ${s.cause}`), s.causeAdvice ? h('div', { class: 'small dim' }, s.causeAdvice) : null) : null,
       h('div', { class: 'stat-grid' },
         statEl('Floor', Math.min(s.floorReached, endless ? s.floorReached : run.map.length)),
@@ -724,6 +841,11 @@ export class App {
       h('div', { class: 'card rewards' }, h('h3', null, 'Rewards (kept forever)'),
         h('div', { class: 'res big' }, h('span', { class: 'essence' }, '◆ +', this.counter(s.essence)), h('span', { class: 'frag' }, '✦ +', this.counter(s.fragments)), s.marks ? h('span', { class: 'marks' }, '♛ +', this.counter(s.marks)) : null),
         h('div', { class: 'tiny dim' }, `+${s.xpGained} XP · ${coreName} +${s.coreXp} core XP${s.coreLevelUps.length ? ` · core level ${s.coreLevelUps.at(-1)}!` : ''}${s.levelUps.length ? ` · player level ${s.levelUps.at(-1)}!` : ''}`)),
+      s.trial ? h('div', { class: 'card trial-summary', style: `--trial:${TRIALS[s.trial.id].color}` },
+        h('h3', null, `${TRIALS[s.trial.id].name} · New best Heat ${s.heat}`),
+        s.trial.medals.length ? h('div', { class: 'gold' }, `${s.trial.medals.join(', ')} earned · +${s.trial.fragments} Fragments`) : null,
+        s.trial.cosmetic ? h('div', { class: 'small dim' }, `Wardrobe unlocked · ${Content.cosmetics.get(s.trial.cosmetic)?.name}`) : null,
+        h('button', { class: 'ghost small', onclick: () => this.showTrials(s.trial!.id) }, 'View trial records')) : null,
       s.feats.length ? h('div', { class: 'card feat-card' }, h('h3', null, `Feats unlocked (${s.feats.length})`),
         ...s.feats.map((f) => h('div', { class: 'small' }, h('b', { class: 'gold' }, `♜ ${f.name}`), h('span', { class: 'dim' }, ` — ${[featRewardText(f), ...featUnlocks(f.id)].filter(Boolean).join(' · ')}`)))) : null,
       h('div', { class: 'card' }, h('h3', null, 'Closest goals'), ...bars),
@@ -749,8 +871,9 @@ export class App {
     this.hidePause();
     const run = this.run;
     const ups = run ? [...run.upgrades.keys()].map((id) => Content.upgrades.get(id)!).filter(Boolean) : [];
-    this.pauseEl = h('div', { class: 'screen overlay' }, h('div', { class: 'wrap', style: 'max-width:380px' },
+    this.pauseEl = h('div', { class: 'screen overlay pause-screen' }, h('div', { class: 'wrap', style: 'max-width:380px' },
       h('h2', { style: 'text-align:center' }, 'Paused'),
+      h('div', { class: 'card small dim' }, 'Drag and release to launch. On keyboard, press Space to aim, use arrows to adjust, then press Space to launch. B brakes and E releases Resonance.'),
       s.challenge ? h('div', { class: 'card small' }, h('div', { class: 'tiny dim' }, 'ROOM CHALLENGE'), s.challenge.label()) : null,
       ups.length ? h('div', { class: 'up-chips' }, ...ups.map((u) => h('span', { class: `up-chip rar-${u.rarity}`, title: u.description }, h('i', null, u.icon ?? '•'), u.name))) : null,
       h('button', { class: 'primary', onclick: () => s.togglePause() }, 'Resume'),
@@ -761,6 +884,7 @@ export class App {
       } }, s.room === 'lab' ? 'Leave laboratory' : 'Abandon run'),
     ));
     this.root.append(this.pauseEl);
+    this.pauseEl.querySelector<HTMLElement>('button.primary')?.focus({ preventScroll: true });
   }
 
   hidePause(): void {
@@ -773,6 +897,9 @@ export class App {
     const el = h('div', { class: 'screen' });
     this.show(el);
     renderCodex(el, this.profile, () => (this.audio.back(), onBack ? (this.screen?.remove(), (this.screen = null), onBack()) : this.showMenu()));
+    const heading = el.querySelector('h2')!;
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
   }
 
   showResearch(): void {

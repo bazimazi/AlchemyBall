@@ -34,21 +34,24 @@ export function renderCodex(root: HTMLElement, p: Profile, onBack: () => void): 
   let query = '';
   const cols = Content.lists.ELEMENTS.filter((e) => e.tier !== 'hidden').map((e) => e.id);
   const colsWithImpact = [...cols, 'kinetic'];
+  let matrixCursor = `${cols[0]}:${cols[1]}`;
 
   const render = () => {
+    const focus = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.codexFocus : undefined;
     clear(root);
     const known = Object.keys(p.discovered).length;
     const wrap = h('div', { class: 'wrap' },
       h('div', { class: 'row' }, h('button', { class: 'ghost small', onclick: onBack }, '← Back'), h('div', { class: 'spacer' }), h('span', { class: 'pill frag' }, `${known}/${Content.lists.REACTIONS.length} reactions`)),
       h('h2', null, 'Alchemy Codex'),
       h('div', { class: 'tabs' }, ...(['reactions', 'elements', 'bestiary', 'journal'] as Tab[]).map((t) =>
-        h('button', { class: `small${tab === t ? ' on' : ''}`, onclick: () => { tab = t; render(); } }, t[0].toUpperCase() + t.slice(1)))),
+        h('button', { class: `small${tab === t ? ' on' : ''}`, 'data-codex-focus': t, 'aria-pressed': String(tab === t), onclick: () => { tab = t; render(); } }, t[0].toUpperCase() + t.slice(1)))),
     );
     root.append(wrap);
     if (tab === 'reactions') renderReactions(wrap);
     if (tab === 'elements') renderElements(wrap);
     if (tab === 'bestiary') renderBestiary(wrap);
     if (tab === 'journal') renderJournal(wrap);
+    if (focus) root.querySelector<HTMLElement>(`[data-codex-focus="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
   };
 
   const cellFor = (a: string, b: string) => {
@@ -57,12 +60,33 @@ export function renderCodex(root: HTMLElement, p: Profile, onBack: () => void): 
     const k = pairKnowledge(p, pairKey(a, b), rs.map((r) => r.id));
     const label = k.state === 'known' ? String(k.reactions.length) : k.state === 'stirred' ? '!' : k.state === 'inert' ? '·' : k.state === 'hinted' ? '?' : '';
     const isSel = sel && pairKey(sel[0], sel[1]) === pairKey(a, b);
-    return h('div', { class: `cell ${k.state}${isSel ? ' sel' : ''}`, title: `${Content.elements.get(a)?.name} + ${Content.elements.get(b)?.name}`, onclick: () => { sel = [a, b]; render(); } }, label);
+    const key = `${a}:${b}`;
+    const title = `${Content.elements.get(a)?.name} + ${Content.elements.get(b)?.name}`;
+    return h('button', { class: `cell ${k.state}${isSel ? ' sel' : ''}`, title, 'data-codex-focus': key,
+      'aria-label': `${title}. ${STATE_TEXT[k.state]}`, 'aria-pressed': String(!!isSel), tabIndex: key === matrixCursor ? 0 : -1,
+      onclick: () => { matrixCursor = key; sel = [a, b]; render(); } }, label);
   };
 
   const renderReactions = (wrap: HTMLElement) => {
     const seen = (id: string) => id === 'kinetic' || p.seenElements.includes(id);
-    const grid = h('div', { class: 'matrix', style: `grid-template-columns: 20px repeat(${colsWithImpact.length}, minmax(0, 1fr))` });
+    const grid = h('div', { class: 'matrix', role: 'group', 'aria-label': 'Reaction pairs. Use arrow keys to move between cells.', style: `grid-template-columns: 20px repeat(${colsWithImpact.length}, minmax(0, 1fr))` });
+    grid.addEventListener('keydown', (ev) => {
+      const button = ev.target;
+      if (!(button instanceof HTMLButtonElement) || !button.dataset.codexFocus) return;
+      const key = ev.key;
+      const dx = key === 'ArrowRight' ? 1 : key === 'ArrowLeft' ? -1 : 0;
+      const dy = key === 'ArrowDown' ? 1 : key === 'ArrowUp' ? -1 : 0;
+      if (!dx && !dy) return;
+      ev.preventDefault();
+      const [row, col] = button.dataset.codexFocus.split(':');
+      let x = colsWithImpact.indexOf(col) + dx;
+      let y = cols.indexOf(row) + dy;
+      if (x === y) { x += dx; y += dy; }
+      if (!cols[y] || !colsWithImpact[x]) return;
+      matrixCursor = `${cols[y]}:${colsWithImpact[x]}`;
+      const next = grid.querySelector<HTMLButtonElement>(`[data-codex-focus="${CSS.escape(matrixCursor)}"]`);
+      if (next) { button.tabIndex = -1; next.tabIndex = 0; next.focus(); }
+    });
     grid.append(h('div', { class: 'h' }));
     for (const c of colsWithImpact) {
       const d = Content.elements.get(c)!;
@@ -79,7 +103,7 @@ export function renderCodex(root: HTMLElement, p: Profile, onBack: () => void): 
         h('span', { style: '--c:#ffffff10' }, '· tested, inert'), h('span', { style: '--c:#ffffff08' }, 'untested')),
       h('div', { class: 'tiny dim', style: 'margin-top:4px' }, 'Last column (✶) is Impact: reactions triggered by hitting something hard.')));
     if (sel) wrap.append(pairDetail(sel[0], sel[1]));
-    const input = h('input', { type: 'search', placeholder: 'Search known reactions…', value: query, oninput: (e: Event) => { query = (e.target as HTMLInputElement).value.toLowerCase(); renderList(); } });
+    const input = h('input', { type: 'search', 'aria-label': 'Search known reactions', placeholder: 'Search known reactions…', value: query, oninput: (e: Event) => { query = (e.target as HTMLInputElement).value.toLowerCase(); renderList(); } });
     const list = h('div', { style: 'display:flex;flex-direction:column;gap:8px' });
     const renderList = () => {
       clear(list);

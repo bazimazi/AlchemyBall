@@ -309,6 +309,19 @@ export class Fx {
       case 'brake':
         this.ring(e.pos.x, e.pos.y, 40, '#a0e4e7', 0.3, 2);
         break;
+      case 'resonanceReady':
+        this.ring(e.pos.x, e.pos.y, 54, '#bbf6e9', 0.35, 2);
+        break;
+      case 'resonancePulse': {
+        const color = Content.elements.get(e.element)?.color ?? '#bbf6e9';
+        this.ring(e.pos.x, e.pos.y, e.radius, '#dcfff6', 0.42, 5, { kind: 'glow', color });
+        if (!this.reducedMotion) {
+          this.ring(e.pos.x, e.pos.y, e.radius * 0.8, color, 0.55, 8);
+          this.emit(e.pos.x, e.pos.y, 28, color, 420, { kind: 2, life: 0.5, size: 4, drag: 2 });
+          this.addShake(5);
+        }
+        break;
+      }
       case 'zoneSpawned': {
         const z = Content.zones.get(e.zone);
         if (z) this.ring(e.pos.x, e.pos.y, e.radius, z.color, 0.4, 3);

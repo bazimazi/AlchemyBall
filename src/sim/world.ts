@@ -92,6 +92,7 @@ export class World {
   cleared = false;
   over = false;
   reactionCount = 0;
+  resonance = 0;
   private uidSeq = 1;
   private lastDotEvent = -1;
   private potency: Map<string, number>;
@@ -100,6 +101,7 @@ export class World {
   /** Queue of launches from input; consumed on the next step so input is deterministic per step. */
   private pendingLaunch: { dir: Vec2; power: number } | null = null;
   private pendingBrake = false;
+  private pendingPulse = false;
 
   constructor(opts: WorldOptions) {
     this.spec = opts.encounter;
@@ -109,6 +111,7 @@ export class World {
     this.shell = opts.shell;
     this.potency = opts.potency;
     this.sandbox = !!opts.sandbox;
+    if (this.sandbox) this.resonance = 100;
     this.diff = { ...NORMAL_DIFFICULTY, ...(opts.difficulty ?? {}) };
     this.engine = new ReactionEngine(this);
     const W = PHYS.arenaW;
@@ -156,6 +159,37 @@ export class World {
     if (this.ball.brakeCd > 0 || this.over) return false;
     this.pendingBrake = true;
     return true;
+  }
+
+  canPulse(): boolean {
+    return this.resonance >= 100 && !this.pendingPulse && !this.over;
+  }
+
+  pulse(): boolean {
+    if (!this.canPulse()) return false;
+    this.pendingPulse = true;
+    return true;
+  }
+
+  private chargeResonance(amount: number, pos: Vec2): void {
+    if (this.resonance >= 100) return;
+    this.resonance = Math.min(100, this.resonance + amount * (1 + (this.mods.resonanceGain ?? 0)));
+    if (this.resonance === 100) this.emit({ type: 'resonanceReady', pos: { ...pos } });
+  }
+
+  private dischargeResonance(): void {
+    const { pos, coreElement } = this.ball;
+    const radius = PHYS.pulseRadius;
+    this.resonance = 0;
+    this.emit({ type: 'resonancePulse', pos: { ...pos }, radius, element: coreElement });
+    for (const projectile of this.projectiles) {
+      if (projectile.faction === 'hostile' && vdist2(pos, projectile.pos) <= radius * radius) projectile.dead = true;
+    }
+    const targets = this.enemies.filter((e) => !e.dead && e.spawnFx <= 0 && vdist2(pos, e.pos) <= (radius + e.radius) ** 2);
+    for (const enemy of targets) {
+      this.engine.apply(enemy, coreElement, 0.7, { depth: 1, faction: 'player', sourceUid: this.ball.uid });
+    }
+    this.impulseFrom(pos, 520, radius);
   }
 
   // ─── Step ─────────────────────────────────────────────────────────────────
@@ -299,6 +333,10 @@ export class World {
       this.emit({ type: 'brake', pos: { ...b.pos } });
       if (this.mods.brakeNova) this.nova(b.pos, 140 * Math.min(1.4, this.mods.brakeNova), 15 * this.mods.brakeNova, b.coreElement, 0.5, 420);
     }
+    if (this.pendingPulse) {
+      this.pendingPulse = false;
+      this.dischargeResonance();
+    }
 
     // Zone floor effects on drag, currents.
     let zoneDrag = 1;
@@ -365,6 +403,9 @@ export class World {
       this.collideBallWalls(rest);
       this.collideBallObjects(rest, mass, ph.impactDamageMul);
       this.collideBallEnemies(rest, mass, ph.impactDamageMul);
+      // Contact separation can push the ball past a wall after the wall pass.
+      b.pos.x = clamp(b.pos.x, b.radius, PHYS.arenaW - b.radius);
+      b.pos.y = clamp(b.pos.y, b.radius, PHYS.arenaH - b.radius);
     }
   }
 
@@ -395,9 +436,6 @@ export class World {
       }
       if (-vn > 900) this.fastImpact(cp, -vn);
     }
-    // Hard clamp in case of tunnelling through the border.
-    b.pos.x = clamp(b.pos.x, b.radius, PHYS.arenaW - b.radius);
-    b.pos.y = clamp(b.pos.y, b.radius, PHYS.arenaH - b.radius);
   }
 
   private collideBallObjects(rest: number, mass: number, impactMul: number): void {
@@ -480,6 +518,7 @@ export class World {
         if (crit) dmg *= 2 + (this.mods.critMul ?? 0);
         const armored = e.armor > 0 && !e.statuses.has('exposed');
         const bounces = b.bounces;
+        this.chargeResonance(bounces > 0 ? 22 : 12, e.pos);
         this.bumpCombo(e.pos);
         this.damageHolder(e, dmg, 'impact', undefined, undefined, false, crit);
         this.emit({ type: 'hit', pos: { x: b.pos.x + n.x * b.radius, y: b.pos.y + n.y * b.radius }, targetUid: e.uid, damage: dmg, speed: rel, armored, crit, bounces, normal: n });
@@ -1113,7 +1152,7 @@ export class World {
 
   impulseFrom(pos: Vec2, strength: number, radius: number, exclude?: AnyHolder, includeBall = false): void {
     for (const e of this.enemies) {
-      if (e.dead || e === exclude || immovable(e)) continue;
+      if (e.dead || e.spawnFx > 0 || e === exclude || immovable(e)) continue;
       const d = vdist(e.pos, pos);
       if (d > radius + e.radius) continue;
       const n = d > 1 ? vnorm(vsub(e.pos, pos)) : { x: 0, y: -1 };
@@ -1173,9 +1212,9 @@ export class World {
     return this.potency.get(r.id) ?? 1;
   }
 
-  onReaction(r: ReactionDef, holder: AnyHolder): void {
+  onReaction(holder: AnyHolder, faction: Faction, depth: number): void {
     this.reactionCount++;
-    void r;
+    if (faction === 'player' && depth === 0) this.chargeResonance(14, holder.pos);
     // Reactions extend the shot combo while the ball is in motion.
     if (this.ball.combo > 0 || vlen(this.ball.vel) > PHYS.restSpeed) this.bumpCombo(holder.pos);
   }

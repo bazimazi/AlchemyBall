@@ -55,10 +55,11 @@ function engraveDial(c: Context, x: number, y: number, r: number, metal: string,
 export function paintArena(c: Context, palette: RegionDef['palette'], region: string, highContrast: boolean): void {
   const frost = region === 'frostvein';
   const storm = region === 'storm_spire';
-  const metal = frost ? '#87b8d1' : storm ? '#c8a2ae' : '#aa8c62';
-  const strata = frost ? '#759cb1' : storm ? '#9277b1' : '#698887';
-  const tileW = storm ? 120 : frost ? 132 : 98;
-  const tileH = storm ? 94 : frost ? 114 : 76;
+  const archive = region === 'umbral_archive';
+  const metal = frost ? '#87b8d1' : storm ? '#c8a2ae' : archive ? '#bf9aed' : '#aa8c62';
+  const strata = frost ? '#759cb1' : storm ? '#9277b1' : archive ? '#a389d2' : '#698887';
+  const tileW = storm ? 120 : frost ? 132 : archive ? 156 : 98;
+  const tileH = storm ? 94 : frost ? 114 : archive ? 78 : 76;
   let seed = 54217;
   const random = (): number => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -151,6 +152,21 @@ export function paintArena(c: Context, palette: RegionDef['palette'], region: st
   c.globalAlpha = highContrast ? 0.45 : 1;
   engraveDial(c, W / 2, H / 2, 192, metal, palette.light);
   for (const y of [104, H - 104]) engraveDial(c, W / 2, y, 40, metal, palette.light);
+  if (archive) {
+    c.strokeStyle = '#cba7ed45';
+    c.lineWidth = 2;
+    c.beginPath();
+    c.ellipse(W / 2, H / 2, 305, 92, -0.7, 0, TAU);
+    c.ellipse(W / 2, H / 2, 305, 92, 0.7, 0, TAU);
+    c.stroke();
+    c.fillStyle = '#b9b9e070';
+    for (let i = 0; i < 24; i++) {
+      const x = 58 + random() * (W - 116);
+      const y = 100 + random() * (H - 200);
+      polygon(c, x, y, i % 5 === 0 ? 6 : 2, 4, 0);
+      c.fill();
+    }
+  }
 
   for (const x of [34, W - 34]) {
     for (const y of [78, H - 78]) {

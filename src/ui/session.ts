@@ -1,5 +1,5 @@
 import { Content } from '../content';
-import { clamp, type Vec2 } from '../core/vec';
+import { clamp, lerp, type Vec2 } from '../core/vec';
 import { ChallengeTracker } from '../game/challenges';
 import { featUnlocks } from '../game/feats';
 import { potencyMap, unlockedIds } from '../game/profile';
@@ -26,7 +26,7 @@ export interface SessionEnd {
 /** Coach lines for handcrafted tutorial rooms, advanced by gameplay events rather than timers. */
 const COACH: Record<string, { until: SimEvent['type'] | 'wave2'; text: string }[]> = {
   tutorial_launch: [
-    { until: 'launch', text: 'Touch anywhere, pull back, and release to launch the ball.' },
+    { until: 'launch', text: 'Pull back and release to launch. On keyboard, press Space to aim and Space again to launch.' },
     { until: 'hit', text: 'Aim at a dummy. The dotted line shows your path — the ghost ball shows where you will connect.' },
     { until: 'wave2', text: 'Faster impacts deal more damage. Launches use pips (top left), which recharge.' },
     { until: 'brake', text: 'Quick-tap (no drag) to brake. Enemies can only hurt you when you are slow. Drag back to the centre to cancel a shot.' },
@@ -34,7 +34,7 @@ const COACH: Record<string, { until: SimEvent['type'] | 'wave2'; text: string }[
   tutorial_react: [
     { until: 'reaction', text: 'Your Ember Core carries Fire. Slimes are always wet. Hit one and see what happens.' },
     { until: 'wave2', text: 'Every collision swaps elements. Touch the Spring Font (blue) to carry Water too.' },
-    { until: 'cleared', text: 'Imps carry fire. Steam blinds shooters: they cannot fire from inside a cloud. Keep the ball moving to build a combo!' },
+    { until: 'cleared', text: 'Bank shots and reactions charge Resonance. When it’s ready, Pulse to spread Fire and clear nearby projectiles.' },
   ],
 };
 
@@ -57,10 +57,13 @@ export class Session {
   readonly tracker: ProgressionTracker;
   readonly challenge?: ChallengeTracker;
   private acc = 0;
+  private previousOrb: Vec2;
   private aim: AimState = { active: false, dir: { x: 0, y: -1 }, power: 0 };
   private dragStart: Vec2 | null = null;
   private dragCur: Vec2 | null = null;
   private hadAim = false;
+  private aimAngle = -Math.PI / 2;
+  private aimPower = 0.8;
   private pointerId: number | null = null;
   paused = false;
   private blocking = 0;
@@ -68,7 +71,7 @@ export class Session {
   private endTimer = -1;
   private ended = false;
   private hud!: HTMLElement;
-  private hudRefs: Record<string, HTMLElement> = {};
+  private hudRefs!: Record<string, HTMLElement> & { pulse: HTMLButtonElement; brake: HTMLButtonElement };
   private feed: { text: string; color: string; t: number }[] = [];
   private coachIdx = 0;
   private coachSteps: { until: string; text: string }[];
@@ -93,8 +96,11 @@ export class Session {
     app.fx.reset();
     this.world = new World({
       encounter: spec, coreElement: opts.coreElement, maxHp: opts.maxHp, hp: opts.hp, shell: run ? Content.shells.get(run.cfg.shell) : undefined,
-      mods: opts.mods, unlocks: new Set(unlockedIds(p)), potency: potencyMap(p), maxPips: opts.maxPips, seed: opts.seed, sandbox: opts.sandbox, difficulty: opts.difficulty,
+      mods: opts.mods, unlocks: new Set(run?.cfg.mode === 'daily' ? run.cfg.unlocked : unlockedIds(p)),
+      potency: run?.cfg.mode === 'daily' ? new Map() : potencyMap(p),
+      maxPips: opts.maxPips, seed: opts.seed, sandbox: opts.sandbox, difficulty: opts.difficulty,
     });
+    this.previousOrb = { ...this.world.ball.pos };
     this.tracker = new ProgressionTracker(p, run, (n) => this.onNotice(n), !!opts.sandbox);
     this.coachSteps = COACH[room] ?? [];
     if (run && room !== 'lab') {
@@ -104,6 +110,9 @@ export class Session {
     this.unsub.push(this.world.events.onAny((e) => this.onSim(e)));
     this.buildHud();
     this.bindInput();
+    app.renderer.canvas.tabIndex = 0;
+    app.renderer.canvas.setAttribute('aria-label', 'Combat arena. Space aims and launches. Arrow keys adjust angle and power.');
+    app.renderer.canvas.focus({ preventScroll: true });
     document.body.classList.add('in-game');
     const region = run?.region;
     app.audio.setScene(spec.boss ? 'boss' : 'combat', region?.id ?? 'cinder_marsh');
@@ -194,10 +203,12 @@ export class Session {
         this.damaged = true;
         break;
       case 'ballDied':
+        this.aim.active = false;
         this.app.analytics.track('death', e.cause);
         this.app.audio.defeat();
         break;
       case 'cleared':
+        this.aim.active = false;
         // Peggle-style finale: a beat of slow motion and a camera punch on the last kill.
         this.slowmo = Math.max(this.slowmo, 0.55);
         this.app.fx.punchZoom(this.spec.boss ? 0.1 : 0.05, this.world.ball.pos);
@@ -209,6 +220,12 @@ export class Session {
         break;
       case 'comboEnd':
         if (e.count >= 5) this.pushFeed(`×${e.count} combo${e.essence ? ` +${e.essence}◆` : ''}`, '#ffd23a');
+        break;
+      case 'resonanceReady':
+        this.hudRefs.resonanceStatus.textContent = 'Resonance ready';
+        break;
+      case 'resonancePulse':
+        this.hudRefs.resonanceStatus.textContent = '';
         break;
     }
     this.advanceCoach(e.type);
@@ -322,12 +339,29 @@ export class Session {
   }
 
   // ─── Input ────────────────────────────────────────────────────────────────
+  private get acceptsInput(): boolean {
+    return !this.paused && !this.blocking && !this.ended && !this.world.over;
+  }
+
+  private releaseShot(): void {
+    if (this.acceptsInput && this.aim.active) {
+      if (this.world.launch(this.aim.dir, this.aim.power)) this.app.analytics.track('launch');
+      else this.app.audio.denied();
+    }
+    this.aim.active = false;
+    this.app.audio.aimEnd();
+  }
+
+  private usePulse(): void {
+    if (this.acceptsInput) this.world.pulse();
+  }
+
   private bindInput(): void {
     const c = this.app.renderer.canvas;
     const dead = 14;
     const down = (ev: PointerEvent) => {
       this.app.audio.unlock();
-      if (this.paused || this.blocking || this.pointerId !== null) return;
+      if (!this.acceptsInput || this.pointerId !== null || ev.button !== 0) return;
       this.pointerId = ev.pointerId;
       c.setPointerCapture(ev.pointerId);
       this.dragStart = { x: ev.clientX, y: ev.clientY };
@@ -357,27 +391,54 @@ export class Session {
     const up = (ev: PointerEvent) => {
       if (ev.pointerId !== this.pointerId) return;
       this.pointerId = null;
-      if (this.aim.active) {
-        if (this.world.launch(this.aim.dir, this.aim.power)) this.app.analytics.track('launch');
-        else this.app.audio.denied();
-      } else if (this.dragStart && !this.hadAim && !this.paused && !this.blocking) this.world.brake();
-      this.app.audio.aimEnd();
-      this.aim.active = false;
+      if (this.aim.active) this.releaseShot();
+      else if (this.dragStart && !this.hadAim && this.acceptsInput) this.world.brake();
       this.dragStart = this.dragCur = null;
     };
     const cancel = (ev: PointerEvent) => {
       if (ev.pointerId !== this.pointerId) return;
       this.pointerId = null;
       this.aim.active = false;
-      this.dragStart = null;
+      this.dragStart = this.dragCur = null;
       this.app.audio.aimEnd();
     };
     c.addEventListener('pointerdown', down);
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', cancel);
+    c.addEventListener('lostpointercapture', cancel);
     const key = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape' || ev.key === 'p') this.togglePause();
+      if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.altKey || (ev.target as HTMLElement | null)?.closest?.('input, select, textarea, [contenteditable]')) return;
+      const k = ev.key.toLowerCase();
+      if (k === 'escape' && this.aim.active) {
+        this.aim.active = false;
+        this.hadAim = true;
+        this.app.audio.aimEnd();
+        return;
+      }
+      if (!ev.repeat && (k === 'escape' || k === 'p')) {
+        if (!this.blocking && (!this.paused || !this.app.root.querySelector('.screen:not(.pause-screen)'))) this.togglePause();
+        return;
+      }
+      if (!this.acceptsInput || this.pointerId !== null) return;
+      if (k === 'e' || k === 'b') {
+        if (ev.repeat) return;
+        this.app.audio.unlock();
+        if (k === 'e') this.usePulse();
+        else this.world.brake();
+        return;
+      }
+      const arrow = k.startsWith('arrow');
+      if (!arrow && (k !== ' ' || ev.repeat || (ev.target as HTMLElement | null)?.closest?.('button'))) return;
+      ev.preventDefault();
+      this.app.audio.unlock();
+      if (arrow && document.activeElement !== c) c.focus({ preventScroll: true });
+      if (k === ' ' && this.aim.active) return this.releaseShot();
+      if (k === 'arrowleft') this.aimAngle -= Math.PI / 24;
+      if (k === 'arrowright') this.aimAngle += Math.PI / 24;
+      if (k === 'arrowup') this.aimPower = Math.min(1, this.aimPower + 0.05);
+      if (k === 'arrowdown') this.aimPower = Math.max(0.15, this.aimPower - 0.05);
+      this.aim = { active: true, power: this.aimPower, dir: { x: Math.cos(this.aimAngle), y: Math.sin(this.aimAngle) } };
     };
     window.addEventListener('keydown', key);
     const vis = () => {
@@ -389,6 +450,7 @@ export class Session {
       c.removeEventListener('pointermove', move);
       c.removeEventListener('pointerup', up);
       c.removeEventListener('pointercancel', cancel);
+      c.removeEventListener('lostpointercapture', cancel);
       window.removeEventListener('keydown', key);
       document.removeEventListener('visibilitychange', vis);
     });
@@ -399,9 +461,13 @@ export class Session {
     this.paused = !this.paused;
     this.aim.active = false;
     this.pointerId = null;
+    this.dragStart = this.dragCur = null;
     this.app.audio.aimEnd();
     if (this.paused) this.app.showPause(this);
-    else this.app.hidePause();
+    else {
+      this.app.hidePause();
+      this.app.renderer.canvas.focus({ preventScroll: true });
+    }
   }
 
   // ─── Frame ────────────────────────────────────────────────────────────────
@@ -429,11 +495,14 @@ export class Session {
     }
     this.acc += Math.min(dtReal, 0.1) * scale;
     let steps = 0;
-    while (this.acc >= PHYS.step && steps < 14) {
+    while (this.acc >= PHYS.step && steps < 14 && !this.blocking && !w.over) {
+      this.previousOrb.x = w.ball.pos.x;
+      this.previousOrb.y = w.ball.pos.y;
       w.step();
       this.acc -= PHYS.step;
       steps++;
     }
+    if (this.blocking || w.over) this.acc = 0;
     if (this.run && scale > 0) this.run.stats.timeSec += dtReal * scale;
     if (!this.paused) fx.update(dtReal * (scale > 0 ? Math.max(scale, 0.3) : 0));
     this.challenge?.tick(w.time);
@@ -449,7 +518,12 @@ export class Session {
       }
     }
     this.app.audio.update(dtReal, clamp(w.enemies.length / 8 + this.recentReactions / 6 + w.ball.combo / 30, 0, 1));
-    this.app.renderer.draw(w, fx, this.run?.region, this.aim, this.paused || this.blocking ? 0 : dtReal);
+    const alpha = clamp(this.acc / PHYS.step, 0, 1);
+    const orb = scale && !w.over && !this.aim.active ? {
+      x: lerp(this.previousOrb.x, w.ball.pos.x, alpha),
+      y: lerp(this.previousOrb.y, w.ball.pos.y, alpha),
+    } : w.ball.pos;
+    this.app.renderer.draw(w, fx, this.run?.region, this.aim, this.paused || this.blocking ? 0 : dtReal, orb);
     this.updateHud(dtReal);
     if (this.tracker.consumeDirty()) this.app.saveSoon();
     if (w.over && !this.ended) {
@@ -486,6 +560,7 @@ export class Session {
     for (const u of this.unsub) u();
     this.unsub = [];
     this.hud?.remove();
+    this.app.renderer.canvas.removeAttribute('tabindex');
     document.body.classList.remove('in-game');
     this.app.audio.aimEnd();
     this.app.renderer.danger = 0;
@@ -495,24 +570,35 @@ export class Session {
   private buildHud(): void {
     this.world.events.on('ballDied', (e) => (this.lastDeathCause = e.cause));
     const r: Record<string, HTMLElement> = {};
+    const brake = h('button', { class: 'combat-brake', 'aria-label': 'Brake (B)', onclick: () => { if (this.acceptsInput) this.world.brake(); } },
+      h('span', { 'aria-hidden': 'true' }, '▰'), 'Brake', h('kbd', null, 'B'));
+    const pulse = h('button', { class: 'combat-pulse', title: 'Hits and reactions charge Resonance. Pulse to spread your core element and clear nearby enemy shots.', 'aria-label': 'Resonance Pulse (E)', onclick: () => this.usePulse() },
+      (r.pulseFill = h('i')), h('span', { 'aria-hidden': 'true' }, '✦'), h('b', null, 'Pulse'), (r.pulseText = h('span')), h('kbd', null, 'E'));
     const lefty = this.app.profile.settings.leftHanded;
     this.hud = h('div', { class: `hud${lefty ? ' lefty' : ''}` },
       h('div', { class: 'hud-top' },
-        (r.hp = h('div', { class: 'hpbar' }, (r.hpGhost = h('b')), (r.hpFill = h('i')), (r.shield = h('s')), (r.hpText = h('span')))),
-        (r.pips = h('div', { class: 'pips' })),
-        (r.focus = h('div', { class: 'focus', title: 'Aiming focus (slow motion)' }, h('i'))),
-        h('div', { class: 'spacer' }),
-        h('button', { class: 'pause-btn', 'aria-label': 'Pause', onclick: () => this.togglePause() }, '❚❚'),
+        h('div', { class: 'hud-vital' }, h('span', { class: 'hud-label' }, 'Integrity'),
+          (r.hp = h('div', { class: 'hpbar' }, (r.hpGhost = h('b')), (r.hpFill = h('i')), (r.shield = h('s')), (r.hpText = h('span'))))),
+        h('div', { class: 'hud-vital' }, h('span', { class: 'hud-label' }, 'Launch'),
+          (r.pips = h('div', { class: 'pips' }))),
+        h('div', { class: 'hud-vital' }, h('span', { class: 'hud-label' }, 'Focus'),
+          (r.focus = h('div', { class: 'focus', title: 'Aiming focus (slow motion)' }, h('i')))),
+        h('button', { class: 'pause-btn', 'aria-label': 'Pause (P)', onclick: () => this.togglePause() }, 'Ⅱ'),
       ),
       (r.objective = h('div', { class: 'hud-objective' })),
       (r.challenge = h('div', { class: 'hud-challenge', style: 'display:none' })),
       (r.combo = h('div', { class: 'combo', style: 'display:none' }, (r.comboN = h('b')), (r.comboName = h('span')))),
-      (r.boss = h('div', { class: 'boss-bar', style: 'display:none' }, (r.bossName = h('div', { class: 'small' })), h('div', { class: 'bar' }, (r.bossGhost = h('b')), (r.bossFill = h('i')), h('u', { style: 'left:66%' }), h('u', { style: 'left:33%' })))),
+      (r.boss = h('div', { class: 'boss-bar', style: 'display:none' }, (r.bossName = h('div', { class: 'small' })),
+        h('div', { class: 'bar' }, (r.bossGhost = h('b')), (r.bossFill = h('i')),
+          ...(this.world.boss?.data.phases.slice(0, -1).map((phase) => h('u', { style: `left:${phase.hpAbove * 100}%` })) ?? [])))),
       (r.feed = h('div', { class: 'feed' })),
       (r.coach = h('div', { class: 'coach', style: 'display:none' })),
-      (r.bottom = h('div', { class: 'hud-bottom' })),
+      h('div', { class: 'hud-dock' },
+        (r.bottom = h('div', { class: 'hud-bottom' })),
+        h('div', { class: 'combat-controls' }, brake, pulse)),
+      (r.resonanceStatus = h('div', { class: 'sr-only', role: 'status' })),
     );
-    this.hudRefs = r;
+    this.hudRefs = Object.assign(r, { brake, pulse });
     this.app.root.append(this.hud);
   }
 
@@ -544,6 +630,7 @@ export class Session {
     const pipSig = `${b.pips}|${b.maxPips}|${Math.round((b.pipTimer / PHYS.pipRegen) * 10)}`;
     this.set('pips', () => {
       clear(r.pips);
+      r.pips.setAttribute('aria-label', `${b.pips} of ${b.maxPips} launch charges`);
       for (let i = 0; i < b.maxPips; i++) {
         const full = i < b.pips;
         const pip = h('div', { class: `pip${full ? ' full' : ''}` });
@@ -552,6 +639,15 @@ export class Session {
       }
     }, pipSig);
     (r.focus.firstChild as HTMLElement).style.width = `${(b.focus / b.maxFocus) * 100}%`;
+    const resonance = Math.floor(w.resonance);
+    const ready = w.canPulse();
+    this.set('resonance', () => {
+      r.pulse.disabled = !ready;
+      r.pulse.classList.toggle('ready', ready);
+      r.pulseFill.style.transform = `scaleX(${resonance / 100})`;
+      r.pulseText.textContent = ready ? 'Ready' : `${resonance}%`;
+    }, `${resonance}|${ready}`);
+    r.brake.disabled = b.brakeCd > 0 || w.over;
     const chips = w.ballAuras().filter((a) => Content.elements.get(a.element)?.tier !== 'hidden' && a.amount > 0.05);
     const buffs = [...b.buffs.keys()];
     const statuses = [...b.statuses.keys()];
@@ -566,8 +662,13 @@ export class Session {
     }, chips.map((c) => `${c.element}${Math.round(c.amount * 10)}`).join(',') + buffs.join() + statuses.join());
     const wavesTotal = w.spec.waves.length;
     const run = this.run;
-    const floorLabel = run ? (run.cfg.mode === 'endless' ? `  ·  depth ${run.floor + 1}` : `  ·  floor ${run.floor + 1}/${run.map.length}`) : '';
-    const obj = w.spec.objective + (wavesTotal > 1 && w.wave >= 0 ? `  ·  wave ${w.wave + 1}/${wavesTotal}` : '') + floorLabel;
+    const floorLabel = run ? (run.cfg.mode === 'endless' ? `Depth ${run.floor + 1}` : `Floor ${run.floor + 1}/${run.map.length}`) : '';
+    const waveLabel = wavesTotal > 1 && w.wave >= 0 ? `Wave ${w.wave + 1}/${wavesTotal}` : '';
+    const objective = this.room === 'lab' ? 'Laboratory' : this.room === 'tutorial_launch' ? 'Break the dummies'
+      : this.room === 'tutorial_react' ? 'Combine Fire and Water' : w.boss ? 'Boss chamber' : 'Defeat the foes';
+    const obj = this.aim.active && !this.aim.anchor
+      ? `← → Angle · ↑ ↓ Power ${Math.round(this.aim.power * 100)}% · Space to launch`
+      : [objective, floorLabel, waveLabel].filter(Boolean).join(' · ');
     this.set('obj', () => (r.objective.textContent = obj), obj);
     if (this.challenge) {
       const c = this.challenge;

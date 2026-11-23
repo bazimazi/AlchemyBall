@@ -61,6 +61,7 @@ const REGION_SOUND: Record<string, RegionSound> = {
   frostvein: { root: 52, scale: AEOLIAN, bpm: 88, prog: [0, 5, 2, 6], comboRoot: 67, pad: 'sine', padVol: 1.1, lead: 'glass', bass: 'sine', bright: 2600 },
   // Driving, saw-ish: A phrygian (i – bII – i – bVII).
   storm_spire: { root: 45, scale: PHRYGIAN, bpm: 112, prog: [0, 1, 0, 6], comboRoot: 65, pad: 'sawtooth', padVol: 0.6, lead: 'wire', bass: 'sawtooth', bright: 1500 },
+  umbral_archive: { root: 48, scale: AEOLIAN, bpm: 102, prog: [0, 5, 3, 4], comboRoot: 72, pad: 'triangle', padVol: 0.88, lead: 'glass', bass: 'sine', bright: 1900 },
 };
 const DEFAULT_REGION = 'cinder_marsh';
 const BOSS_PROG = [0, 0, 5, 1];
@@ -1100,6 +1101,15 @@ export class Audio {
         this.osc(d, t, 300 * vary(), 0.12, 0.04, { to: 150 });
         break;
       }
+      case 'resonanceReady':
+      case 'resonancePulse': {
+        const discharge = e.type === 'resonancePulse';
+        const d = this.at(e.pos.x);
+        const root = discharge ? 330 : 660;
+        [1, 1.5, 2].forEach((ratio, i) => this.osc(d, t + i * 0.042, root * ratio, 0.24, discharge ? 0.08 : 0.045, { type: 'sine' }));
+        if (discharge) this.noise(d, t, 0.3, 0.08, 1700, { to: 350 });
+        break;
+      }
       case 'shoot': {
         if (!this.gate('shoot', 0.08, 0.15)) return;
         const d = this.at(e.pos.x);
@@ -1233,6 +1243,9 @@ export class Haptics {
 
   onEvent(e: SimEvent): void {
     switch (e.type) {
+      case 'resonancePulse':
+        this.pulse([16, 20, 28], true);
+        break;
       case 'hit':
         if (e.crit) this.pulse([10, 20, 16]);
         else if (e.speed > 600) this.pulse(12);

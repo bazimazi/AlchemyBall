@@ -19,26 +19,31 @@ npm run dev        # http://localhost:5173 (also exposed on your LAN for testing
 | Cancel a shot | While aiming, drag back to where you started, then let go. |
 | Aim slow-motion | Time slows while you hold an aim. This drains the focus bar next to the pips. |
 | Brake | Quick tap without dragging. Has a 1 s cooldown. |
+| Resonance Pulse | Press **Pulse** or `E` when charged. Repels nearby foes, spreads your core element, and clears hostile shots in range. Hits and reactions charge it. Bank shots charge it faster. |
 | Pause | ❚❚ button, or `Esc` / `P` |
+
+**Keyboard:** Press `Space` to aim and `Space` again to launch. Left and right change the angle. Up and down change power. `B` brakes and `Esc` cancels the aim.
 
 Launches spend **pips** (the white circles at the top), which recharge over time. Enemies can only hurt you on contact while you are moving slowly.
 
-Hits and reactions while the ball keeps moving build a **combo**. A higher combo means more Essence from kills, and the combo pays out when it ends. Runs are saved between rooms, so you can close the app and **Continue** later.
+Hits and reactions while the ball keeps moving build a **combo**. A higher combo means more Essence from kills, and the combo pays out when it ends. Runs are saved between rooms and during upgrade selection, so you can close the app and **Continue** later.
 
 ## What is in the game
 
-- **Three regions, each with its own boss:**
+- **Four regions, each with its own boss:**
   - The Cinder Marsh (the Crucible Warden).
   - The Frostvein Caverns (the Rime Matriarch), unlocked by beating the Warden.
   - The Storm Spire (the Tempest Engine), unlocked by beating the Matriarch.
-- **Enemies:** 18 types, including elites with **affixes** (Shielded, Swift, Volatile, Regenerating, Insulated, Enraged).
+  - The Umbral Archive (the Eclipse Orrery), unlocked by beating the Tempest Engine.
+- **Enemies:** 21 types, including elites with **affixes** (Shielded, Swift, Volatile, Regenerating, Insulated, Enraged).
 - **31 reactions** to discover and master.
 - **51 run upgrades**, including **8 Evolutions** that each fuse two maxed upgrades into a legendary.
 - **Rooms:** Skirmish, Elite, Reliquary, Still Spring, Research Cache, **Merchant** and **Anomaly** (text events). Every combat room offers an optional **challenge**.
 - **Long-term goals:**
   - 9 cores, each with **mastery levels** and **2 unlockable aspects**.
   - A **Heat ladder** from 1 to 10, with records kept per core.
-  - **46 feats**, most of which unlock new upgrades or cosmetics.
+  - **47 feats**, most of which unlock new upgrades or cosmetics.
+  - **Four Expedition Trials** unlock after the Warden. Each changes a combat rule and records Bronze, Silver and Gold medals across every core and region. Earn medals to collect Research Fragments and cosmetics.
   - Three **contracts** with no timers.
   - **Trails and ball skins** that are cosmetic only.
   - Player levels up to 25.
@@ -63,17 +68,17 @@ Hits and reactions while the ball keeps moving build a **combo**. A higher combo
 | `npm run graph` | Same as `validate`, plus the reaction dependency graph as Mermaid |
 | `npm run sim -- 20 0.6` | Balance simulation: bot runs × cores × skill. Prints win rate, reactions/min, discovery rate, reaction share and room length |
 | `node tools/smoke.mjs` / `node tools/playthrough.mjs <url> <outDir> <seconds>` | Drive the built game in a real browser (Chrome or Edge via `playwright-core`), take screenshots, and fail on console errors. Start `npm run preview` first. |
-| `npm run build` then `node tools/gallery.mjs` | Screenshot every major screen, the full creature roster and all three bosses into `smoke-out/gallery/`. |
+| `npm run build` then `node tools/gallery.mjs` | Screenshot the main screens, creature roster and all four bosses into `smoke-out/gallery/`. |
 | `npm run build` then `node tools/visual-review.mjs --playthrough` | Start a temporary preview server, capture desktop/mobile art and combat scenes, check narrow layouts and reduced motion, then run smoke and playthrough checks. Screenshots go to `smoke-out/visual/`; set `BROWSER` to use a different Chromium executable. |
 
-The visual style uses engraved stone, brass details and luminous elemental sources. Creatures have distinct silhouettes, gaze tracking, idle motion and impact deformation. Reactions combine shockwaves, sparks, crystal shards and layered lightning; the orb leaves a time-based light trail. Everything is drawn locally with Canvas and CSS, with no external art downloads. Reduced motion follows both the in-game setting and the operating system preference.
+The Observatory and regional plates use bundled artwork. The arena and creatures are drawn with Canvas, with a smoothed orb, readable hazard shapes, and distinct reaction effects. Reduced motion follows both the in-game setting and the operating system preference.
 
 The docs cover the details:
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): engine choice, module map, reaction pipeline, safety limits, saves and performance.
 - [docs/DESIGN.md](docs/DESIGN.md): pillars, the elemental rules, content catalogue, progression and economy.
 - [docs/ROADMAP.md](docs/ROADMAP.md): phase status, acceptance criteria, known limitations and next steps.
-- [docs/RESEARCH.md](docs/RESEARCH.md): the research on game feel, UI/UX and long-term progression behind v0.4, with sources, and how each finding was applied.
+- [docs/RESEARCH.md](docs/RESEARCH.md): international references for physics combat, game feel, accessibility, and progression, with the design decisions they informed.
 
 ## Adding content
 
